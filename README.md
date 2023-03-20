@@ -12,13 +12,13 @@ The [CF template](/templates/CF-A1-cmu.yml).
 
 AWS deployment diagram (using [AWS notation](https://aws.amazon.com/architecture/icons/)).
 
-[AWS deployment diagram](/images/a1-deployment-view.jpg)
+![AWS deployment diagram](/images/a1-deployment-view.jpg)
 
 
 Example of application design that could be deployed to this infrastructure.
 
-[runtime view diagram](/images/a1-runtime-view.jpg)
-[notation key](/images/notation-key-runtime-views.jpg)
+![runtime view diagram](/images/a1-runtime-view.jpg)
+![notation key](/images/notation-key-runtime-views.jpg)
 
 
 ## Multiple EC2 and RDS cluster
@@ -27,14 +27,15 @@ The [CF template](/templates/CF-A2-cmu.yml).
 
 AWS deployment diagram (using [AWS notation](https://aws.amazon.com/architecture/icons/)).
 
-[AWS deployment diagram](/images/a2-deployment-view.jpg)
+![AWS deployment diagram](/images/a2-deployment-view.jpg)
 
 
 Example of application design that could be deployed to this infrastructure.
 
-[runtime view diagram](/images/a2-runtime-view.jpg)
+![runtime view diagram](/images/a2-runtime-view.jpg)
 
 
 
 ## EKS cluster and RDS cluster
 
+*TO-DO*
