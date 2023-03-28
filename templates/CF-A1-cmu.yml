@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: 2010-09-09
 Parameters:
-#ssh to the EC2 instance
- SSHLocation:
+  #ssh to the EC2 instance
+  SSHLocation:
     Description: The IP address range that can be used to SSH to the EC2 instances
     Type: String
     MinLength: '9'
@@ -9,8 +9,8 @@ Parameters:
     Default: 0.0.0.0/0
     AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
     ConstraintDescription: Must be a valid IP CIDR range of the form x.x.x.x/x
-#db login
- DBUsername:
+  #db login
+  DBUsername:
     NoEcho: 'true'
     Description: Username for database access
     Type: String
@@ -18,29 +18,29 @@ Parameters:
     MaxLength: '16'
     AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
     ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
- DBPassword:
+  DBPassword:
     NoEcho: 'true'
     Description: Password for database access
     Type: String
     MinLength: '8'
     MaxLength: '41'
     AllowedPattern: '[a-zA-Z0-9]*'
-#launch template data
- LatestAmiId:
-   Description: Region specific image from the Parameter Store
-   Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
-   Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
- InstanceType:
-   Description: Amazon EC2 instance type for the instances
-   Type: String
-   AllowedValues:
-     - t3.micro
-     - t3.small
-     - t3.medium
-   Default: t3.micro
+  #launch template data
+  LatestAmiId:
+    Description: Region specific image from the Parameter Store
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+  InstanceType:
+    Description: Amazon EC2 instance type for the instances
+    Type: String
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+    Default: t3.micro
 
 Resources:
- # Vpc  
+  # Vpc
   MyVPC:
     Type: 'AWS::EC2::VPC'
     Properties:
@@ -48,7 +48,7 @@ Resources:
       EnableDnsSupport: 'true'
       EnableDnsHostnames: 'true'
 
- # Public Subnets
+  # Public Subnets
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -59,7 +59,7 @@ Resources:
       Tags:
         - Key: Name
           Value: PublicSubnet1
-          
+
   PublicSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
@@ -70,8 +70,8 @@ Resources:
       Tags:
         - Key: Name
           Value: PublicSubnet2
-      
- # Internet gateway
+
+  # Internet gateway
   InternetGateway:
     Type: "AWS::EC2::InternetGateway"
     DependsOn: MyVPC
@@ -81,16 +81,16 @@ Resources:
       VpcId: !Ref MyVPC
       InternetGatewayId: !Ref "InternetGateway"
 
- # Route tables 
- #public 
+  # Route tables
+  #public
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref MyVPC
       Tags:
-      - Key: Name
-        Value: Public
-  PublicRoute1:   # the public route table routs directly to the IGW:
+        - Key: Name
+          Value: Public
+  PublicRoute1: # the public route table routs directly to the IGW:
     Type: AWS::EC2::Route
     DependsOn: VPCGatewayAttachment
     Properties:
@@ -98,8 +98,8 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
- # Route table associated with subnets
- # Attach the public subnets to public route tables.
+  # Route table associated with subnets
+  # Attach the public subnets to public route tables.
   PublicSubnetARouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -110,54 +110,54 @@ Resources:
     Properties:
       SubnetId: !Ref PublicSubnet2
       RouteTableId: !Ref PublicRouteTable
-  
- # EC2 Security Group
+
+  # EC2 Security Group
   EC2SecurityGroup:
     DependsOn: MyVPC
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
       GroupDescription: security group ec2 allowing http and ssh
-      VpcId: 
+      VpcId:
         Ref: MyVPC
       SecurityGroupEgress:
-      - Description: Allow all outbound traffic
-        IpProtocol: "-1"
-        CidrIp: 0.0.0.0/0
+        - Description: Allow all outbound traffic
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
       SecurityGroupIngress:
-      - IpProtocol: tcp
-        FromPort: 80
-        ToPort: 80
-        SourceSecurityGroupId:
-          Fn::GetAtt:
-          - ALBSecurityGroup
-          - GroupId
-      - IpProtocol: tcp  #ssh configured to your IP 
-        FromPort: 22
-        ToPort: 22
-        CidrIp: !Ref SSHLocation
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId:
+            Fn::GetAtt:
+              - ALBSecurityGroup
+              - GroupId
+        - IpProtocol: tcp  #ssh configured to your IP
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
 
- # EC2 Instances
+  # EC2 Instances
 
   EC2InstanceA:
     Type: 'AWS::EC2::Instance'
     Properties:
-      ImageId: ami-0d5eff06f840b45e9 
+      ImageId: ami-0d5eff06f840b45e9
       InstanceType: t2.micro
       KeyName: vockey
-      UserData: 
-        Fn::Base64: 
+      UserData:
+        Fn::Base64:
           !Sub |
-            #!/bin/bash
-            yum update -y
-            yum install -y httpd.x86_64
-            systemctl start httpd.service
-            systemctl enable httpd.service
-            echo ?Hello World from $(hostname -f)? > /var/www/html/index.html
-            sudo yum update -y
-            sudo amazon-linux-extras install docker
-            sudo service docker start
-            sudo usermod -a -G docker ec2-user
-            sudo chkconfig docker on
+          #!/bin/bash
+          yum update -y
+          yum install -y httpd.x86_64
+          systemctl start httpd.service
+          systemctl enable httpd.service
+          echo ?Hello World from $(hostname -f)? > /var/www/html/index.html
+          sudo yum update -y
+          sudo amazon-linux-extras install docker
+          sudo service docker start
+          sudo usermod -a -G docker ec2-user
+          sudo chkconfig docker on
       SubnetId: !Ref PublicSubnet1
       SecurityGroupIds:
         - !Ref EC2SecurityGroup
@@ -175,20 +175,20 @@ Resources:
       ImageId: ami-0d5eff06f840b45e9
       InstanceType: t2.micro
       KeyName: vockey
-      UserData: 
-       Fn::Base64: 
+      UserData:
+        Fn::Base64:
           !Sub |
-            #!/bin/bash
-            yum update -y
-            yum install -y httpd.x86_64
-            systemctl start httpd.service
-            systemctl enable httpd.service
-            echo ?Hello World from $(hostname -f)? > /var/www/html/index.html
-            sudo yum update -y
-            sudo amazon-linux-extras install docker
-            sudo service docker start
-            sudo usermod -a -G docker ec2-user
-            sudo chkconfig docker on
+          #!/bin/bash
+          yum update -y
+          yum install -y httpd.x86_64
+          systemctl start httpd.service
+          systemctl enable httpd.service
+          echo ?Hello World from $(hostname -f)? > /var/www/html/index.html
+          sudo yum update -y
+          sudo amazon-linux-extras install docker
+          sudo service docker start
+          sudo usermod -a -G docker ec2-user
+          sudo chkconfig docker on
       SubnetId: !Ref PublicSubnet2
       SecurityGroupIds:
         - !Ref EC2SecurityGroup
@@ -196,9 +196,9 @@ Resources:
         - Key: Name
           Value: EC2InstanceB
   MyEIP2:
-   Type: AWS::EC2::EIP
-   Properties:
-    InstanceId: !Ref EC2InstanceB
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref EC2InstanceB
 
   # ALB Security Group
   ALBSecurityGroup:
@@ -208,20 +208,20 @@ Resources:
       GroupDescription: ALB Security Group
       VpcId: !Ref MyVPC
       SecurityGroupEgress:
-      - Description: Allow all outbound traffic
-        IpProtocol: "-1"
-        CidrIp: 0.0.0.0/0
+        - Description: Allow all outbound traffic
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
       SecurityGroupIngress:
-      - IpProtocol: tcp   #HTTP open to world
-        FromPort: 80
-        ToPort: 80
-        CidrIp: 0.0.0.0/0
-      - IpProtocol: tcp
-        FromPort: 443
-        ToPort: 443
-        CidrIp: 0.0.0.0/0
-  
- # Load-balancer
+        - IpProtocol: tcp   #HTTP open to world
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  # Load-balancer
   MyLoadBalancer:
     DependsOn: VPCGatewayAttachment
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -230,12 +230,12 @@ Resources:
       Scheme: internet-facing
       Type: application
       Subnets:
-      - !Ref PublicSubnet1
-      - !Ref PublicSubnet2
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
       SecurityGroups:
         - !Ref ALBSecurityGroup
 
- # ALB listener
+  # ALB listener
   HTTPListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -247,7 +247,7 @@ Resources:
           TargetGroupArn: !Ref EC2TargetGroup
           Type: forward
 
- # EC2 target group 
+  # EC2 target group
   EC2TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -261,25 +261,25 @@ Resources:
       Port: 80
       Protocol: HTTP
       TargetGroupAttributes:
-      - Key: deregistration_delay.timeout_seconds
-        Value: '30'
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
       Targets:
-      - Id: !Ref EC2InstanceA
-        Port: 80
-      - Id: !Ref EC2InstanceB
-        Port: 80
+        - Id: !Ref EC2InstanceA
+          Port: 80
+        - Id: !Ref EC2InstanceB
+          Port: 80
       UnhealthyThresholdCount: 3
       VpcId: !Ref MyVPC
 
- # Launch template 
+  # Launch template
   MyLaunchTemplate:
     Type: 'AWS::EC2::LaunchTemplate'
     Properties:
       LaunchTemplateName: !Sub '${AWS::StackName}-launch-template-for-auto-scaling'
       LaunchTemplateData:
-        UserData: 
-         Fn::Base64: 
-          !Sub |
+        UserData:
+          Fn::Base64:
+            !Sub |
             #!/bin/bash
             yum update -y
             yum install -y httpd.x86_64
@@ -302,8 +302,8 @@ Resources:
         ImageId: !Ref LatestAmiId
         InstanceType: !Ref InstanceType
         KeyName: vockey
-        
- # Auto scaling 
+
+  # Auto scaling
   myASG:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
@@ -317,8 +317,8 @@ Resources:
         - !Ref PublicSubnet1
         - !Ref PublicSubnet2
 
- #Database
- #db subnets
+  #Database
+  #db subnets
   DBSubnet1a:
     Type: 'AWS::EC2::Subnet'
     Properties:
@@ -340,27 +340,27 @@ Resources:
         - Key: name
           Value: DBSubnet1b
 
- # Subnet group
-  MyDBSubnetGroup: 
+  # Subnet group
+  MyDBSubnetGroup:
     Type: "AWS::RDS::DBSubnetGroup"
-    Properties: 
+    Properties:
       DBSubnetGroupDescription: description
-      SubnetIds: 
+      SubnetIds:
         - Ref: DBSubnet1a
         - Ref: DBSubnet1b
 
- # DB Security group 
+  # DB Security group
   DBEC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     DependsOn: EC2SecurityGroup
     Properties:
-      VpcId: 
+      VpcId:
         Ref: MyVPC
       GroupDescription: Open database for access
       SecurityGroupEgress:
-      - Description: Allow all outbound traffic
-        IpProtocol: "-1"
-        CidrIp: 0.0.0.0/0
+        - Description: Allow all outbound traffic
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
       SecurityGroupIngress:
         - IpProtocol: tcp  # port 3306 opened to the ec2 instances.
           FromPort: 3306
@@ -368,7 +368,7 @@ Resources:
           SourceSecurityGroupId:
             Ref: EC2SecurityGroup
 
- # Aurora cluster 
+  # Aurora cluster
   DatabaseCluster:
     Type: AWS::RDS::DBCluster
     Properties:
@@ -379,10 +379,10 @@ Resources:
       PreferredBackupWindow: 01:00-02:00
       PreferredMaintenanceWindow: mon:03:00-mon:04:00
       DBSubnetGroupName: !Ref MyDBSubnetGroup
-      VpcSecurityGroupIds: 
-       -  !Ref DBEC2SecurityGroup
+      VpcSecurityGroupIds:
+        - !Ref DBEC2SecurityGroup
       StorageEncrypted: true
-      
+
   DatabasePrimaryInstance:
     Type: AWS::RDS::DBInstance
     Properties:
