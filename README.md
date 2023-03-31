@@ -38,4 +38,9 @@ Example of application design that could be deployed to this infrastructure.
 
 ## EKS cluster and RDS cluster
 
-*TO-DO*
+The [CF template](/templates/CF-A3-cmu.yml).
+
+Example of application design that could be deployed to this infrastructure.
+
+![runtime view diagram](/images/a3-runtime-view.jpg)
+

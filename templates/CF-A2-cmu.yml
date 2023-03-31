@@ -10,7 +10,7 @@ Parameters:
     Default: 0.0.0.0/0
     AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
     ConstraintDescription: Must be a valid IP CIDR range of the form x.x.x.x/x
-  #db login
+  # Database credentials
   DBUsername:
     NoEcho: 'true'
     Description: Username for database access
@@ -462,7 +462,7 @@ Resources:
           SourceSecurityGroupId:
             Ref: EC2SecurityGroup
 
-  # Aurora cluster
+  # RDS Aurora cluster (MySQL)
   DatabaseCluster:
     Type: AWS::RDS::DBCluster
     Properties:
@@ -494,6 +494,3 @@ Resources:
       DBInstanceClass: db.t3.small
       DBSubnetGroupName: !Ref MySubnetGroup
       PubliclyAccessible: false
-        
-
-
