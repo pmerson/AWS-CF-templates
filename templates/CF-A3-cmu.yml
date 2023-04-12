@@ -143,8 +143,9 @@ Resources:
   EC2SecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
-      GroupDescription: Security group for Amazon EC2 instance
-      VpcId: !Ref BookStoreVpc
+      VpcId:
+        Ref: BookStoreVpc
+      GroupDescription: "Security group for EC2 instances"
       Tags:
         - Key: Name
           Value: EC2SecurityGroup
@@ -187,21 +188,21 @@ Resources:
             Ref: EC2SecurityGroup
 
   # Create an IAM role for the EKS worker nodes
-  EKSWorkerNodeRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: sts:AssumeRole
-        Version: "2012-10-17"
-      Path: /
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
-        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
-        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+#  EKSWorkerNodeRole:
+#    Type: AWS::IAM::Role
+#    Properties:
+#      AssumeRolePolicyDocument:
+#        Statement:
+#          - Effect: Allow
+#            Principal:
+#              Service: ec2.amazonaws.com
+#            Action: sts:AssumeRole
+#        Version: "2012-10-17"
+#      Path: /
+#      ManagedPolicyArns:
+#        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+#        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+#        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
 
   ## EKS cluster
   EKSCluster:
@@ -218,21 +219,20 @@ Resources:
           - !Ref PublicSubnet1
 
   ## Node group with 4 nodes for the EKS cluster
-  MyNodeGroup:
-    Type: AWS::EKS::Nodegroup
-    Properties:
-      ClusterName: !Ref EKSCluster
-      NodeRole: arn:aws:iam::aws:policy/aws-service-role/AWSServiceRoleForAmazonEKSNodegroup
+#  MyNodeGroup:
+#    Type: AWS::EKS::Nodegroup
+#    Properties:
+#      ClusterName: !Ref EKSCluster
 #      NodeRole: !GetAtt EKSWorkerNodeRole.Arn
-      Subnets:
-        - !Ref PublicSubnet2
-        - !Ref PublicSubnet1
-      ScalingConfig:
-        DesiredSize: 4
-        MaxSize: 4
-        MinSize: 4
-      InstanceTypes:
-        - t2.micro
+#      Subnets:
+#        - !Ref PublicSubnet2
+#        - !Ref PublicSubnet1
+#      ScalingConfig:
+#        DesiredSize: 4
+#        MaxSize: 4
+#        MinSize: 4
+#      InstanceTypes:
+#        - t2.micro
 
 
   EC2Inbound:
