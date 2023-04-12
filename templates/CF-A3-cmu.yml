@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: 2010-09-09
 Parameters:
   LabRoleARN:
     Type: String
-    Description: Enter the ARN for LabRole (IAM | Roles | select LabRole | copy ARN)
+    Description: Enter the ARN for LabRole (IAM | Roles | click on LabRole | copy ARN)
     #  RDSInstanceName:
     #    Type: String
     #  RDSDBName:
@@ -186,6 +186,23 @@ Resources:
           SourceSecurityGroupId:
             Ref: EC2SecurityGroup
 
+  # Create an IAM role for the EKS worker nodes
+  EKSWorkerNodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+        Version: "2012-10-17"
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+
   ## EKS cluster
   EKSCluster:
     Type: 'AWS::EKS::Cluster'
@@ -205,7 +222,8 @@ Resources:
     Type: AWS::EKS::Nodegroup
     Properties:
       ClusterName: !Ref EKSCluster
-      NodeRole: !Ref LabRoleARN
+      NodeRole: arn:aws:iam::aws:policy/aws-service-role/AWSServiceRoleForAmazonEKSNodegroup
+#      NodeRole: !GetAtt EKSWorkerNodeRole.Arn
       Subnets:
         - !Ref PublicSubnet2
         - !Ref PublicSubnet1
