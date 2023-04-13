@@ -12,7 +12,7 @@ The [CF template](/templates/CF-A1-cmu.yml).
 
 AWS deployment diagram (using [AWS notation](https://aws.amazon.com/architecture/icons/)).
 
-![AWS deployment diagram](/images/a1-deployment-view.jpg)
+![AWS deployment diagram](/images/a1-deployment-view.png)
 
 
 Example of application design that could be deployed to this infrastructure.
@@ -27,7 +27,7 @@ The [CF template](/templates/CF-A2-cmu.yml).
 
 AWS deployment diagram (using [AWS notation](https://aws.amazon.com/architecture/icons/)).
 
-![AWS deployment diagram](/images/a2-deployment-view.jpg)
+![AWS deployment diagram](/images/a2-deployment-view.png)
 
 
 Example of application design that could be deployed to this infrastructure.
@@ -39,6 +39,10 @@ Example of application design that could be deployed to this infrastructure.
 ## EKS cluster and RDS cluster
 
 The [CF template](/templates/CF-A3-cmu.yml).
+
+AWS deployment diagram (using [AWS notation](https://aws.amazon.com/architecture/icons/)).
+
+![AWS deployment diagram](/images/a3-deployment-view.png)
 
 Example of application design that could be deployed to this infrastructure.
 
