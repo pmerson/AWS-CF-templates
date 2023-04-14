@@ -1,16 +1,9 @@
 AWSTemplateFormatVersion: 2010-09-09
 Parameters:
+
   LabRoleARN:
     Type: String
     Description: Enter the ARN for LabRole (IAM | Roles | click on LabRole | copy ARN)
-    #  RDSInstanceName:
-    #    Type: String
-    #  RDSDBName:
-    #    Type: String
-    #  RDSDBUsername:
-    #    Type: String
-    #  RDSDBPassword:
-    #    Type: String
 
   # Database credentials
   DBUsername:
@@ -21,6 +14,7 @@ Parameters:
     MaxLength: '16'
     AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
     ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
+
   DBPassword:
     NoEcho: 'true'
     Description: Password for database access
@@ -29,144 +23,327 @@ Parameters:
     MaxLength: '41'
     AllowedPattern: '[a-zA-Z0-9]*'
 
+  VpcBlock:
+    Type: String
+    Default: 192.168.0.0/16
+    Description: The CIDR range for the VPC. This should be a valid private (RFC 1918) CIDR range.
+
+  PublicSubnet01Block:
+    Type: String
+    Default: 192.168.0.0/18
+    Description: CidrBlock for public subnet 01 within the VPC
+
+  PublicSubnet02Block:
+    Type: String
+    Default: 192.168.64.0/18
+    Description: CidrBlock for public subnet 02 within the VPC
+
+  PrivateSubnet01Block:
+    Type: String
+    Default: 192.168.128.0/18
+    Description: CidrBlock for private subnet 01 within the VPC
+
+  PrivateSubnet02Block:
+    Type: String
+    Default: 192.168.192.0/18
+    Description: CidrBlock for private subnet 02 within the VPC
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "Worker Network Configuration"
+        Parameters:
+          - VpcBlock
+          - PublicSubnet01Block
+          - PublicSubnet02Block
+          - PrivateSubnet01Block
+          - PrivateSubnet02Block
 
 Resources:
-  ##networking
-  BookStoreVpc:
-    Type: "AWS::EC2::VPC"
+
+  ##
+  ## Networking
+  ##
+  VPC:
+    Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: 10.0.0.0/16
-      EnableDnsHostnames: true
+      CidrBlock:  !Ref VpcBlock
       EnableDnsSupport: true
-
-  PublicSubnet1:
-    Type: "AWS::EC2::Subnet"
-    Properties:
-      VpcId: !Ref BookStoreVpc
-      AvailabilityZone: !Select [ 0, !GetAZs "" ]
-      CidrBlock: 10.0.1.0/24
-      MapPublicIpOnLaunch: true
-
-  PublicSubnet2:
-    Type: "AWS::EC2::Subnet"
-    Properties:
-      VpcId: !Ref BookStoreVpc
-      AvailabilityZone: !Select [ 1, !GetAZs "" ]
-      CidrBlock: 10.0.2.0/24
-      MapPublicIpOnLaunch: true
-
-  PrivateSubnet1:
-    Type: "AWS::EC2::Subnet"
-    Properties:
-      VpcId: !Ref BookStoreVpc
-      AvailabilityZone: !Select [ 0, !GetAZs "" ]
-      CidrBlock: 10.0.3.0/24
-
-  PrivateSubnet2:
-    Type: "AWS::EC2::Subnet"
-    Properties:
-      VpcId: !Ref BookStoreVpc
-      AvailabilityZone: !Select [ 1, !GetAZs "" ]
-      CidrBlock: 10.0.4.0/24
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-VPC'
 
   InternetGateway:
     Type: "AWS::EC2::InternetGateway"
 
-  VpcGatewayAttachment:
+  VPCGatewayAttachment:
     Type: "AWS::EC2::VPCGatewayAttachment"
     Properties:
-      VpcId: !Ref BookStoreVpc
       InternetGatewayId: !Ref InternetGateway
-
-  NATGateway:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt NATGatewayEIP.AllocationId
-      SubnetId: !Ref PublicSubnet1
-
-  NATGatewayEIP:
-    Type: AWS::EC2::EIP
-    Properties:
-      Domain: !Ref BookStoreVpc
-
-  RouteNATGateway:
-    DependsOn: NATGateway
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      DestinationCidrBlock: '0.0.0.0/0'
-      NatGatewayId: !Ref NATGateway
+      VpcId: !Ref VPC
 
   PublicRouteTable:
-    Type: "AWS::EC2::RouteTable"
+    Type: AWS::EC2::RouteTable
     Properties:
-      VpcId: !Ref BookStoreVpc
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: Public Subnets
+        - Key: Network
+          Value: Public
 
-  PrivateRouteTable:
-    Type: "AWS::EC2::RouteTable"
+  PrivateRouteTable01:
+    Type: AWS::EC2::RouteTable
     Properties:
-      VpcId: !Ref BookStoreVpc
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: Private Subnet AZ1
+        - Key: Network
+          Value: Private01
 
-  PublicSubnet1RouteTableAssociation:
-    Type: "AWS::EC2::SubnetRouteTableAssociation"
+  PrivateRouteTable02:
+    Type: AWS::EC2::RouteTable
     Properties:
-      SubnetId: !Ref PublicSubnet1
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: Private Subnet AZ2
+        - Key: Network
+          Value: Private02
+
+  PublicRoute:
+    DependsOn: VPCGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PrivateRoute01:
+    DependsOn:
+      - VPCGatewayAttachment
+      - NatGateway01
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable01
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway01
+
+  PrivateRoute02:
+    DependsOn:
+      - VPCGatewayAttachment
+      - NatGateway02
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable02
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway02
+
+  NatGateway01:
+    DependsOn:
+      - NatGatewayEIP1
+      - PublicSubnet01
+      - VPCGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt 'NatGatewayEIP1.AllocationId'
+      SubnetId: !Ref PublicSubnet01
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-NatGatewayAZ1'
+
+  NatGateway02:
+    DependsOn:
+      - NatGatewayEIP2
+      - PublicSubnet02
+      - VPCGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt 'NatGatewayEIP2.AllocationId'
+      SubnetId: !Ref PublicSubnet02
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-NatGatewayAZ2'
+
+  NatGatewayEIP1:
+    DependsOn:
+      - VPCGatewayAttachment
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: vpc
+
+  NatGatewayEIP2:
+    DependsOn:
+      - VPCGatewayAttachment
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: vpc
+
+  PublicSubnet01:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Subnet 01
+    Properties:
+      MapPublicIpOnLaunch: true
+      AvailabilityZone:
+        Fn::Select:
+          - '0'
+          - Fn::GetAZs:
+              Ref: AWS::Region
+      CidrBlock:
+        Ref: PublicSubnet01Block
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-PublicSubnet01"
+        - Key: kubernetes.io/role/elb
+          Value: 1
+
+  PublicSubnet02:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Subnet 02
+    Properties:
+      MapPublicIpOnLaunch: true
+      AvailabilityZone:
+        Fn::Select:
+          - '1'
+          - Fn::GetAZs:
+              Ref: AWS::Region
+      CidrBlock:
+        Ref: PublicSubnet02Block
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-PublicSubnet02"
+        - Key: kubernetes.io/role/elb
+          Value: 1
+
+  PrivateSubnet01:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Subnet 03
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+          - '0'
+          - Fn::GetAZs:
+              Ref: AWS::Region
+      CidrBlock:
+        Ref: PrivateSubnet01Block
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-PrivateSubnet01"
+        - Key: kubernetes.io/role/internal-elb
+          Value: 1
+
+  PrivateSubnet02:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      Comment: Private Subnet 02
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+          - '1'
+          - Fn::GetAZs:
+              Ref: AWS::Region
+      CidrBlock:
+        Ref: PrivateSubnet02Block
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-PrivateSubnet02"
+        - Key: kubernetes.io/role/internal-elb
+          Value: 1
+
+  PublicSubnet01RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet01
       RouteTableId: !Ref PublicRouteTable
 
-  PublicSubnet2RouteTableAssociation:
-    Type: "AWS::EC2::SubnetRouteTableAssociation"
+  PublicSubnet02RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PublicSubnet2
+      SubnetId: !Ref PublicSubnet02
       RouteTableId: !Ref PublicRouteTable
 
-  PrivateSubnet1RouteTableAssociation:
-    Type: "AWS::EC2::SubnetRouteTableAssociation"
+  PrivateSubnet01RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PrivateSubnet1
-      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet01
+      RouteTableId: !Ref PrivateRouteTable01
 
-  PrivateSubnet2RouteTableAssociation:
-    Type: "AWS::EC2::SubnetRouteTableAssociation"
+  PrivateSubnet02RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PrivateSubnet2
-      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet02
+      RouteTableId: !Ref PrivateRouteTable02
 
-  MySubnetGroup:
+  # Security group to be used for the EKS cluster. It is automatically applied to all nodes in the cluster.
+  ControlPlaneSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Cluster communication with worker nodes
+      VpcId: !Ref VPC
+
+
+  ##
+  ## EKS cluster
+  ##
+  EKSCluster:
+    Type: 'AWS::EKS::Cluster'
+    Properties:
+      Name: book-store-eks-cluster
+      RoleArn: !Ref LabRoleARN
+      ResourcesVpcConfig:
+        SecurityGroupIds:
+          - !Ref ControlPlaneSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnet01
+          - !Ref PublicSubnet02
+          - !Ref PrivateSubnet01
+          - !Ref PrivateSubnet02
+
+  ## Node group with 1-5 nodes for the EKS cluster
+  MyNodeGroup:
+    Type: AWS::EKS::Nodegroup
+    Properties:
+      ClusterName: !Ref EKSCluster
+      NodeRole: !Ref LabRoleARN
+      Subnets:
+        - !Ref PublicSubnet01
+        - !Ref PublicSubnet02
+        - !Ref PrivateSubnet01
+        - !Ref PrivateSubnet02
+      ScalingConfig:
+        DesiredSize: 4
+        MaxSize: 5
+        MinSize: 1
+      InstanceTypes:
+        - t2.micro
+
+
+  ##
+  ## Database cluster
+  ##
+  MyDBSubnetGroup:
     Type: 'AWS::RDS::DBSubnetGroup'
     Properties:
-      DBSubnetGroupName: my-subnet-group2
+      DBSubnetGroupName: my-dbsubnet-group
       DBSubnetGroupDescription: My subnet group for RDS
       SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
-
-  EC2SecurityGroup:
-    Type: 'AWS::EC2::SecurityGroup'
-    Properties:
-      VpcId:
-        Ref: BookStoreVpc
-      GroupDescription: "Security group for EC2 instances"
-      Tags:
-        - Key: Name
-          Value: EC2SecurityGroup
-
-  EKSSecurityGroup:
-    Type: 'AWS::EC2::SecurityGroup'
-    Properties:
-      GroupDescription: Security group for Amazon EKS cluster
-      VpcId: !Ref BookStoreVpc
-      Tags:
-        - Key: Name
-          Value: EKSSG
-
-  #  RDSSecurityGroup:
-  #    Type: 'AWS::EC2::SecurityGroup'
-  #    Properties:
-  #      GroupDescription: Security group for RDS MySQL instance
-  #      VpcId: !Ref Vpc
-  #      Tags:
-  #        - Key: Name
-  #          Value: RDSSecurityGroup
+        - !Ref PrivateSubnet01
+        - !Ref PrivateSubnet02
 
   # DB Security group
   DBEC2SecurityGroup:
@@ -174,102 +351,18 @@ Resources:
     #    DependsOn: EC2SecurityGroup
     Properties:
       VpcId:
-        Ref: BookStoreVpc
+        Ref: VPC
       GroupDescription: Open database for access
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"
           CidrIp: 0.0.0.0/0
       SecurityGroupIngress:
-        - IpProtocol: tcp  # port 3306 opened to the ec2 instances.
+        - IpProtocol: tcp  # port 3306 opened to the worker nodes in the EKS cluster
           FromPort: 3306
           ToPort: 3306
           SourceSecurityGroupId:
-            Ref: EC2SecurityGroup
-
-  # Create an IAM role for the EKS worker nodes
-#  EKSWorkerNodeRole:
-#    Type: AWS::IAM::Role
-#    Properties:
-#      AssumeRolePolicyDocument:
-#        Statement:
-#          - Effect: Allow
-#            Principal:
-#              Service: ec2.amazonaws.com
-#            Action: sts:AssumeRole
-#        Version: "2012-10-17"
-#      Path: /
-#      ManagedPolicyArns:
-#        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
-#        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
-#        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
-
-  ## EKS cluster
-  EKSCluster:
-    Type: 'AWS::EKS::Cluster'
-    Properties:
-      Name: book-store-eks-cluster
-      RoleArn: !Ref LabRoleARN
-#      Version: "1.18"    // 1.20 and 1.18 are not supported, let's go with default
-      ResourcesVpcConfig:
-        SecurityGroupIds:
-          - !Ref EKSSecurityGroup
-        SubnetIds:
-          - !Ref PublicSubnet2
-          - !Ref PublicSubnet1
-
-  ## Node group with 4 nodes for the EKS cluster
-#  MyNodeGroup:
-#    Type: AWS::EKS::Nodegroup
-#    Properties:
-#      ClusterName: !Ref EKSCluster
-#      NodeRole: !GetAtt EKSWorkerNodeRole.Arn
-#      Subnets:
-#        - !Ref PublicSubnet2
-#        - !Ref PublicSubnet1
-#      ScalingConfig:
-#        DesiredSize: 4
-#        MaxSize: 4
-#        MinSize: 4
-#      InstanceTypes:
-#        - t2.micro
-
-
-  EC2Inbound:
-    Type: 'AWS::EC2::SecurityGroupIngress'
-    Properties:
-      IpProtocol: tcp
-      FromPort: 9092
-      ToPort: 9092
-      SourceSecurityGroupId: !Ref EKSSecurityGroup
-      GroupId:
-        Fn::GetAtt:
-          - EC2SecurityGroup
-          - GroupId
-
-#  RDSInbound:
-#    Type: 'AWS::EC2::SecurityGroupIngress'
-#    Properties:
-#      IpProtocol: tcp
-#      FromPort: 3306
-#      ToPort: 3306
-#      SourceSecurityGroupId: !Ref EKSSecurityGroup
-#      GroupId:
-#        Fn::GetAtt:
-#          - RDSSecurityGroup
-#          - GroupId
-
-  EKSInbound:
-    Type: 'AWS::EC2::SecurityGroupIngress'
-    Properties:
-      IpProtocol: tcp
-      FromPort: 80
-      ToPort: 80
-      CidrIp: 0.0.0.0/0
-      GroupId:
-        Fn::GetAtt:
-          - EKSSecurityGroup
-          - GroupId
+            Ref: ControlPlaneSecurityGroup
 
   # RDS Aurora cluster (MySQL)
   DatabaseCluster:
@@ -281,7 +374,7 @@ Resources:
       BackupRetentionPeriod: '7'
       PreferredBackupWindow: 01:00-02:00
       PreferredMaintenanceWindow: mon:03:00-mon:04:00
-      DBSubnetGroupName: !Ref MySubnetGroup
+      DBSubnetGroupName: !Ref MyDBSubnetGroup
       VpcSecurityGroupIds:
         - !Ref DBEC2SecurityGroup
       StorageEncrypted: true
@@ -292,7 +385,7 @@ Resources:
       Engine: aurora-mysql
       DBClusterIdentifier: !Ref "DatabaseCluster"
       DBInstanceClass: db.t3.small
-      DBSubnetGroupName: !Ref MySubnetGroup
+      DBSubnetGroupName: !Ref MyDBSubnetGroup
       PubliclyAccessible: false
 
   DatabaseReplicaInstance:
@@ -301,32 +394,22 @@ Resources:
       Engine: aurora-mysql
       DBClusterIdentifier: !Ref "DatabaseCluster"
       DBInstanceClass: db.t3.small
-      DBSubnetGroupName: !Ref MySubnetGroup
+      DBSubnetGroupName: !Ref MyDBSubnetGroup
       PubliclyAccessible: false
 
-#  # RDS
-#  RDSInstance:
-#    Type: 'AWS::RDS::DBInstance'
-#    Properties:
-#      DBInstanceIdentifier: !Ref RDSInstanceName
-#      DBInstanceClass: db.t2.micro
-#      Engine: mysql
-#      AllocatedStorage: 20
-#      MasterUsername: !Ref RDSDBUsername
-#      MasterUserPassword: !Ref RDSDBPassword
-#      DBName: !Ref RDSDBName
-#      VPCSecurityGroups:
-#        - !Ref RDSSecurityGroup
-#      DBSubnetGroupName: !Ref MySubnetGroup
 
 Outputs:
-  EKSClusterEndpoint:
-    Description: Endpoint for EKS cluster 1
-    Value: !GetAtt EKSCluster.Endpoint
-  RDSInstanceEndpoint:
-    Description: Endpoint for RDS MySQL primary instance
-    Value: !GetAtt DatabaseCluster.Endpoint.Address
-  #    Value: !GetAtt RDSInstance.Endpoint.Address
 
+  SubnetIds:
+    Description: Subnets IDs in the VPC
+    Value: !Join [ ",", [ !Ref PublicSubnet01, !Ref PublicSubnet02, !Ref PrivateSubnet01, !Ref PrivateSubnet02 ] ]
+
+  SecurityGroups:
+    Description: Security group for the cluster control plane communication with worker nodes
+    Value: !Join [ ",", [ !Ref ControlPlaneSecurityGroup ] ]
+
+  VpcId:
+    Description: The VPC Id
+    Value: !Ref VPC
 
 
