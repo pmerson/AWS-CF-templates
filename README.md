@@ -42,7 +42,7 @@ The [CF template](/templates/CF-A3-cmu.yml).
 
 AWS deployment diagram (using [AWS notation](https://aws.amazon.com/architecture/icons/)).
 
-![AWS deployment diagram](/images/a3-deployment-view.png)
+TO-DO
 
 Example of application design that could be deployed to this infrastructure.
 
