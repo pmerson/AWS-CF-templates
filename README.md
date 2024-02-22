@@ -2,9 +2,10 @@
 
 [CloudFormation](https://aws.amazon.com/cloudformation/) (CF) is the IaC solution/service offered in the AWS cloud.
 
-This repository contains a few CF templates developed by Paulo Dantas (from AWS) to be used in an educational project about distributed systems architecture.
-For each CF template, you see the AWS deployment architecture and an example of application architecture that could be deployed to that AWS infrastructure.
-The templates have increasing complexity. 
+This repository contains a few CF templates developed by Paulo Dantas (from AWS) and Paulo Merson. They were created to 
+be used in an educational project about distributed systems architecture.
+For each CF template, you see the AWS deployment architecture and an example of application architecture that could be deployed 
+to that AWS infrastructure. The templates have increasing complexity. 
 
 ## EC2 and RDS cluster
 
