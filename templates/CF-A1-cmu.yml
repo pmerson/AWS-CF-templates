@@ -41,7 +41,7 @@ Parameters:
 
 Resources:
   # Vpc
-  MyVPC:
+  vpc-bookstore:
     Type: 'AWS::EC2::VPC'
     Properties:
       CidrBlock: 10.0.0.0/16
@@ -49,36 +49,36 @@ Resources:
       EnableDnsHostnames: 'true'
 
   # Public Subnets
-  PublicSubnet1:
+  public-subnet-1:
     Type: AWS::EC2::Subnet
     Properties:
       AvailabilityZone: "us-east-1a"
       MapPublicIpOnLaunch: true
-      VpcId: !Ref MyVPC
+      VpcId: !Ref vpc-bookstore
       CidrBlock: 10.0.0.0/24
       Tags:
         - Key: Name
-          Value: PublicSubnet1
+          Value: public-subnet-1
 
-  PublicSubnet2:
+  public-subnet-2:
     Type: AWS::EC2::Subnet
     Properties:
       AvailabilityZone: "us-east-1b"
       MapPublicIpOnLaunch: true
-      VpcId: !Ref MyVPC
+      VpcId: !Ref vpc-bookstore
       CidrBlock: 10.0.20.0/24
       Tags:
         - Key: Name
-          Value: PublicSubnet2
+          Value: public-subnet-2
 
   # Internet gateway
   InternetGateway:
     Type: "AWS::EC2::InternetGateway"
-    DependsOn: MyVPC
+    DependsOn: vpc-bookstore
   VPCGatewayAttachment:
     Type: "AWS::EC2::VPCGatewayAttachment"
     Properties:
-      VpcId: !Ref MyVPC
+      VpcId: !Ref vpc-bookstore
       InternetGatewayId: !Ref "InternetGateway"
 
   # Route tables
@@ -86,11 +86,11 @@ Resources:
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
-      VpcId: !Ref MyVPC
+      VpcId: !Ref vpc-bookstore
       Tags:
         - Key: Name
           Value: Public
-  PublicRoute1: # the public route table routs directly to the IGW:
+  PublicRoute1: # the public route table routes directly to the IGW:
     Type: AWS::EC2::Route
     DependsOn: VPCGatewayAttachment
     Properties:
@@ -103,22 +103,22 @@ Resources:
   PublicSubnetARouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PublicSubnet1
+      SubnetId: !Ref public-subnet-1
       RouteTableId: !Ref PublicRouteTable
   PublicSubnetBRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PublicSubnet2
+      SubnetId: !Ref public-subnet-2
       RouteTableId: !Ref PublicRouteTable
 
   # EC2 Security Group
   EC2SecurityGroup:
-    DependsOn: MyVPC
+    DependsOn: vpc-bookstore
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
       GroupDescription: security group ec2 allowing http and ssh
       VpcId:
-        Ref: MyVPC
+        Ref: vpc-bookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"
@@ -137,8 +137,7 @@ Resources:
           CidrIp: !Ref SSHLocation
 
   # EC2 Instances
-
-  EC2InstanceA:
+  ec2-bookstore-A:
     Type: 'AWS::EC2::Instance'
     Properties:
       ImageId: ami-0d5eff06f840b45e9
@@ -158,18 +157,18 @@ Resources:
           sudo service docker start
           sudo usermod -a -G docker ec2-user
           sudo chkconfig docker on
-      SubnetId: !Ref PublicSubnet1
+      SubnetId: !Ref public-subnet-1
       SecurityGroupIds:
         - !Ref EC2SecurityGroup
       Tags:
         - Key: Name
-          Value: EC2InstanceA
+          Value: ec2-bookstore-A
   MyEIP:
     Type: AWS::EC2::EIP
     Properties:
-      InstanceId: !Ref EC2InstanceA
+      InstanceId: !Ref ec2-bookstore-A
 
-  EC2InstanceB:
+  ec2-bookstore-B:
     Type: 'AWS::EC2::Instance'
     Properties:
       ImageId: ami-0d5eff06f840b45e9
@@ -189,16 +188,19 @@ Resources:
           sudo service docker start
           sudo usermod -a -G docker ec2-user
           sudo chkconfig docker on
-      SubnetId: !Ref PublicSubnet2
+      SubnetId: !Ref public-subnet-2
       SecurityGroupIds:
         - !Ref EC2SecurityGroup
       Tags:
         - Key: Name
-          Value: EC2InstanceB
+          Value: ec2-bookstore-B
   MyEIP2:
     Type: AWS::EC2::EIP
     Properties:
-      InstanceId: !Ref EC2InstanceB
+      InstanceId: !Ref ec2-bookstore-B
+
+  # Application Load Balancer (ALB)
+  # It's a layer 7 (application layer) load balancer. Ideal for HTTP/HTTPS traffic and microservices architectures.
 
   # ALB Security Group
   ALBSecurityGroup:
@@ -206,7 +208,7 @@ Resources:
     Properties:
       GroupName: ALB-SG
       GroupDescription: ALB Security Group
-      VpcId: !Ref MyVPC
+      VpcId: !Ref vpc-bookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"
@@ -221,7 +223,7 @@ Resources:
           ToPort: 443
           CidrIp: 0.0.0.0/0
 
-  # Load-balancer
+  # The ALB itself
   MyLoadBalancer:
     DependsOn: VPCGatewayAttachment
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -230,12 +232,16 @@ Resources:
       Scheme: internet-facing
       Type: application
       Subnets:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
+        - !Ref public-subnet-1
+        - !Ref public-subnet-2
       SecurityGroups:
         - !Ref ALBSecurityGroup
 
   # ALB listener
+  # Defines the protocol/port combination that the ALB listens on for incoming requests.
+  # It checks for connection requests from clients using the configured protocol and port.
+  # Based on the rules you define, it forwards requests to one or more target groups.
+  # Each ALB requires at least one listener to accept traffic.
   HTTPListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -247,7 +253,10 @@ Resources:
           TargetGroupArn: !Ref EC2TargetGroup
           Type: forward
 
-  # EC2 target group
+  # ALB target group
+  # Is used to route requests to one or more registered targets (in this case EC2 instances).
+  # It acts as a logical grouping of targets. The ALB continually monitors the health of registered targets.
+  # Requests are routed to healthy targets within the target group.
   EC2TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -264,12 +273,25 @@ Resources:
         - Key: deregistration_delay.timeout_seconds
           Value: '30'
       Targets:
-        - Id: !Ref EC2InstanceA
+        - Id: !Ref ec2-bookstore-A
           Port: 80
-        - Id: !Ref EC2InstanceB
+        - Id: !Ref ec2-bookstore-B
           Port: 80
       UnhealthyThresholdCount: 3
-      VpcId: !Ref MyVPC
+      VpcId: !Ref vpc-bookstore
+
+  #################################
+  # This CF template defines 2 EC2 instances in two AZs with an ALB. This setup provides high AVAILABILITY as
+  # traffic can be directed to a single instance in case there's a problem with the other instance or AZ.
+  # However, this setup does NOT provide high SCALABILITY. The scalable alternative would be to define an
+  # Auto Scaling Group (ASG). ASGs dynamically adjust the number of instances based on demand. If traffic increases,
+  # it launches more instances; if demand decreases, it terminates instances.
+  # ASGs require a launch template (or launch configuration), which describes the configuration for the EC2 instances.
+  # The snippet below defines a LaunchTemplate and an ASG. However, the ASG is not a target of the ALB, so it's not
+  # used. The ASG has minSize 0 so it won't launch any EC2 instances when the CF stack is created.
+  #
+  # If you have time, feel free to alter your CF template to use the ASG instead of the two EC2 instances. YOu'll
+  # have to add the ASG as a target of the ALB.
 
   # Launch template
   MyLaunchTemplate:
@@ -303,7 +325,7 @@ Resources:
         InstanceType: !Ref InstanceType
         KeyName: vockey
 
-  # Auto scaling
+  # The ASG itself
   myASG:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
@@ -314,31 +336,34 @@ Resources:
       MinSize: '0'
       DesiredCapacity: '0'
       VPCZoneIdentifier:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
+        - !Ref public-subnet-1
+        - !Ref public-subnet-2
 
-  #Database
-  #db subnets
-  DBSubnet1a:
+  # End of ASG definition
+  #################################
+
+  # Database
+  # db subnets
+  DB-subnet-1:
     Type: 'AWS::EC2::Subnet'
     Properties:
       VpcId:
-        Ref: MyVPC
+        Ref: vpc-bookstore
       CidrBlock: 10.0.3.0/24
       AvailabilityZone: us-east-1a
       Tags:
         - Key: name
-          Value: DBSubnet1a
-  DBSubnet1b:
+          Value: DB-subnet-1
+  DB-subnet-2:
     Type: 'AWS::EC2::Subnet'
     Properties:
       VpcId:
-        Ref: MyVPC
+        Ref: vpc-bookstore
       CidrBlock: 10.0.5.0/24
       AvailabilityZone: us-east-1b
       Tags:
         - Key: name
-          Value: DBSubnet1b
+          Value: DB-subnet-2
 
   # Subnet group
   MyDBSubnetGroup:
@@ -346,16 +371,16 @@ Resources:
     Properties:
       DBSubnetGroupDescription: description
       SubnetIds:
-        - Ref: DBSubnet1a
-        - Ref: DBSubnet1b
+        - Ref: DB-subnet-1
+        - Ref: DB-subnet-2
 
   # DB Security group
-  DBEC2SecurityGroup:
+  DBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     DependsOn: EC2SecurityGroup
     Properties:
       VpcId:
-        Ref: MyVPC
+        Ref: vpc-bookstore
       GroupDescription: Open database for access
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
@@ -368,8 +393,10 @@ Resources:
           SourceSecurityGroupId:
             Ref: EC2SecurityGroup
 
-  # Aurora cluster
-  DatabaseCluster:
+  # RDS Aurora cluster
+  # By declaring two DB instances in the cluster, Aurora will make the 1st instance the primary and the second the
+  # replica, and will manage the primary/replica roles automatically from then on.
+  dbcluster-aurora-bookstore-dev:
     Type: AWS::RDS::DBCluster
     Properties:
       Engine: aurora-mysql
@@ -380,23 +407,23 @@ Resources:
       PreferredMaintenanceWindow: mon:03:00-mon:04:00
       DBSubnetGroupName: !Ref MyDBSubnetGroup
       VpcSecurityGroupIds:
-        - !Ref DBEC2SecurityGroup
+        - !Ref DBSecurityGroup
       StorageEncrypted: true
 
-  DatabasePrimaryInstance:
+  db-aurora-dev-A:
     Type: AWS::RDS::DBInstance
     Properties:
       Engine: aurora-mysql
-      DBClusterIdentifier: !Ref "DatabaseCluster"
+      DBClusterIdentifier: !Ref dbcluster-aurora-bookstore-dev
       DBInstanceClass: db.t3.small
       DBSubnetGroupName: !Ref "MyDBSubnetGroup"
       PubliclyAccessible: false
 
-  DatabaseReplicaInstance:
+  db-aurora-dev-B:
     Type: AWS::RDS::DBInstance
     Properties:
       Engine: aurora-mysql
-      DBClusterIdentifier: !Ref "DatabaseCluster"
+      DBClusterIdentifier: !Ref dbcluster-aurora-bookstore-dev
       DBInstanceClass: db.t3.small
       DBSubnetGroupName: !Ref "MyDBSubnetGroup"
       PubliclyAccessible: false
