@@ -41,7 +41,7 @@ Parameters:
 
 Resources:
   # Vpc
-  vpc-bookstore:
+  VpcBookstore:
     Type: 'AWS::EC2::VPC'
     Properties:
       CidrBlock: 10.0.0.0/16
@@ -49,36 +49,36 @@ Resources:
       EnableDnsHostnames: 'true'
 
   # Public Subnets
-  public-subnet-1:
+  PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       AvailabilityZone: "us-east-1a"
       MapPublicIpOnLaunch: true
-      VpcId: !Ref vpc-bookstore
+      VpcId: !Ref VpcBookstore
       CidrBlock: 10.0.0.0/24
       Tags:
         - Key: Name
-          Value: public-subnet-1
+          Value: PublicSubnet1
 
-  public-subnet-2:
+  PublicSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
       AvailabilityZone: "us-east-1b"
       MapPublicIpOnLaunch: true
-      VpcId: !Ref vpc-bookstore
+      VpcId: !Ref VpcBookstore
       CidrBlock: 10.0.20.0/24
       Tags:
         - Key: Name
-          Value: public-subnet-2
+          Value: PublicSubnet2
 
   # Internet gateway
   InternetGateway:
     Type: "AWS::EC2::InternetGateway"
-    DependsOn: vpc-bookstore
+    DependsOn: VpcBookstore
   VPCGatewayAttachment:
     Type: "AWS::EC2::VPCGatewayAttachment"
     Properties:
-      VpcId: !Ref vpc-bookstore
+      VpcId: !Ref VpcBookstore
       InternetGatewayId: !Ref "InternetGateway"
 
   # Route tables
@@ -86,7 +86,7 @@ Resources:
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
-      VpcId: !Ref vpc-bookstore
+      VpcId: !Ref VpcBookstore
       Tags:
         - Key: Name
           Value: Public
@@ -103,22 +103,22 @@ Resources:
   PublicSubnetARouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref public-subnet-1
+      SubnetId: !Ref PublicSubnet1
       RouteTableId: !Ref PublicRouteTable
   PublicSubnetBRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref public-subnet-2
+      SubnetId: !Ref PublicSubnet2
       RouteTableId: !Ref PublicRouteTable
 
   # EC2 Security Group
   EC2SecurityGroup:
-    DependsOn: vpc-bookstore
+    DependsOn: VpcBookstore
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
       GroupDescription: security group ec2 allowing http and ssh
       VpcId:
-        Ref: vpc-bookstore
+        Ref: VpcBookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"
@@ -137,7 +137,7 @@ Resources:
           CidrIp: !Ref SSHLocation
 
   # EC2 Instances
-  ec2-bookstore-A:
+  EC2BookstoreA:
     Type: 'AWS::EC2::Instance'
     Properties:
       ImageId: ami-0d5eff06f840b45e9
@@ -157,18 +157,18 @@ Resources:
           sudo service docker start
           sudo usermod -a -G docker ec2-user
           sudo chkconfig docker on
-      SubnetId: !Ref public-subnet-1
+      SubnetId: !Ref PublicSubnet1
       SecurityGroupIds:
         - !Ref EC2SecurityGroup
       Tags:
         - Key: Name
-          Value: ec2-bookstore-A
+          Value: EC2BookstoreA
   MyEIP:
     Type: AWS::EC2::EIP
     Properties:
-      InstanceId: !Ref ec2-bookstore-A
+      InstanceId: !Ref EC2BookstoreA
 
-  ec2-bookstore-B:
+  EC2BookstoreB:
     Type: 'AWS::EC2::Instance'
     Properties:
       ImageId: ami-0d5eff06f840b45e9
@@ -188,16 +188,16 @@ Resources:
           sudo service docker start
           sudo usermod -a -G docker ec2-user
           sudo chkconfig docker on
-      SubnetId: !Ref public-subnet-2
+      SubnetId: !Ref PublicSubnet2
       SecurityGroupIds:
         - !Ref EC2SecurityGroup
       Tags:
         - Key: Name
-          Value: ec2-bookstore-B
+          Value: EC2BookstoreB
   MyEIP2:
     Type: AWS::EC2::EIP
     Properties:
-      InstanceId: !Ref ec2-bookstore-B
+      InstanceId: !Ref EC2BookstoreB
 
   # Application Load Balancer (ALB)
   # It's a layer 7 (application layer) load balancer. Ideal for HTTP/HTTPS traffic and microservices architectures.
@@ -208,7 +208,7 @@ Resources:
     Properties:
       GroupName: ALB-SG
       GroupDescription: ALB Security Group
-      VpcId: !Ref vpc-bookstore
+      VpcId: !Ref VpcBookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"
@@ -224,7 +224,7 @@ Resources:
           CidrIp: 0.0.0.0/0
 
   # The ALB itself
-  MyLoadBalancer:
+  MyALB:
     DependsOn: VPCGatewayAttachment
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
@@ -232,8 +232,8 @@ Resources:
       Scheme: internet-facing
       Type: application
       Subnets:
-        - !Ref public-subnet-1
-        - !Ref public-subnet-2
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
       SecurityGroups:
         - !Ref ALBSecurityGroup
 
@@ -245,7 +245,7 @@ Resources:
   HTTPListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
-      LoadBalancerArn: !Ref MyLoadBalancer
+      LoadBalancerArn: !Ref MyALB
       Port: 80
       Protocol: HTTP
       DefaultActions:
@@ -273,12 +273,12 @@ Resources:
         - Key: deregistration_delay.timeout_seconds
           Value: '30'
       Targets:
-        - Id: !Ref ec2-bookstore-A
+        - Id: !Ref EC2BookstoreA
           Port: 80
-        - Id: !Ref ec2-bookstore-B
+        - Id: !Ref EC2BookstoreB
           Port: 80
       UnhealthyThresholdCount: 3
-      VpcId: !Ref vpc-bookstore
+      VpcId: !Ref VpcBookstore
 
   #################################
   # This CF template defines 2 EC2 instances in two AZs with an ALB. This setup provides high AVAILABILITY as
@@ -326,7 +326,7 @@ Resources:
         KeyName: vockey
 
   # The ASG itself
-  myASG:
+  MyASG:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       LaunchTemplate:
@@ -336,34 +336,34 @@ Resources:
       MinSize: '0'
       DesiredCapacity: '0'
       VPCZoneIdentifier:
-        - !Ref public-subnet-1
-        - !Ref public-subnet-2
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
 
   # End of ASG definition
   #################################
 
   # Database
   # db subnets
-  DB-subnet-1:
+  DBSubnet1:
     Type: 'AWS::EC2::Subnet'
     Properties:
       VpcId:
-        Ref: vpc-bookstore
+        Ref: VpcBookstore
       CidrBlock: 10.0.3.0/24
       AvailabilityZone: us-east-1a
       Tags:
         - Key: name
-          Value: DB-subnet-1
-  DB-subnet-2:
+          Value: DBSubnet1
+  DBSubnet2:
     Type: 'AWS::EC2::Subnet'
     Properties:
       VpcId:
-        Ref: vpc-bookstore
+        Ref: VpcBookstore
       CidrBlock: 10.0.5.0/24
       AvailabilityZone: us-east-1b
       Tags:
         - Key: name
-          Value: DB-subnet-2
+          Value: DBSubnet2
 
   # Subnet group
   MyDBSubnetGroup:
@@ -371,8 +371,8 @@ Resources:
     Properties:
       DBSubnetGroupDescription: description
       SubnetIds:
-        - Ref: DB-subnet-1
-        - Ref: DB-subnet-2
+        - Ref: DBSubnet1
+        - Ref: DBSubnet2
 
   # DB Security group
   DBSecurityGroup:
@@ -380,7 +380,7 @@ Resources:
     DependsOn: EC2SecurityGroup
     Properties:
       VpcId:
-        Ref: vpc-bookstore
+        Ref: VpcBookstore
       GroupDescription: Open database for access
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
@@ -396,7 +396,7 @@ Resources:
   # RDS Aurora cluster
   # By declaring two DB instances in the cluster, Aurora will make the 1st instance the primary and the second the
   # replica, and will manage the primary/replica roles automatically from then on.
-  dbcluster-aurora-bookstore-dev:
+  DBClusterAuroraBookstore:
     Type: AWS::RDS::DBCluster
     Properties:
       Engine: aurora-mysql
@@ -410,22 +410,21 @@ Resources:
         - !Ref DBSecurityGroup
       StorageEncrypted: true
 
-  db-aurora-dev-A:
+  DBAuroraA:
     Type: AWS::RDS::DBInstance
     Properties:
       Engine: aurora-mysql
-      DBClusterIdentifier: !Ref dbcluster-aurora-bookstore-dev
+      DBClusterIdentifier: !Ref DBClusterAuroraBookstore
       DBInstanceClass: db.t3.small
       DBSubnetGroupName: !Ref "MyDBSubnetGroup"
       PubliclyAccessible: false
 
-  db-aurora-dev-B:
+  DBAuroraB:
     Type: AWS::RDS::DBInstance
     Properties:
       Engine: aurora-mysql
-      DBClusterIdentifier: !Ref dbcluster-aurora-bookstore-dev
+      DBClusterIdentifier: !Ref DBClusterAuroraBookstore
       DBInstanceClass: db.t3.small
       DBSubnetGroupName: !Ref "MyDBSubnetGroup"
       PubliclyAccessible: false
         
-
