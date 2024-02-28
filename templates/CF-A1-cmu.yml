@@ -11,7 +11,6 @@ Parameters:
     ConstraintDescription: Must be a valid IP CIDR range of the form x.x.x.x/x
   #db login
   DBUsername:
-    NoEcho: 'true'
     Description: Username for database access
     Type: String
     MinLength: '1'
@@ -147,11 +146,6 @@ Resources:
         Fn::Base64:
           !Sub |
           #!/bin/bash
-          yum update -y
-          yum install -y httpd.x86_64
-          systemctl start httpd.service
-          systemctl enable httpd.service
-          echo ?Hello World from $(hostname -f)? > /var/www/html/index.html
           sudo yum update -y
           sudo amazon-linux-extras install docker
           sudo service docker start
@@ -178,11 +172,6 @@ Resources:
         Fn::Base64:
           !Sub |
           #!/bin/bash
-          yum update -y
-          yum install -y httpd.x86_64
-          systemctl start httpd.service
-          systemctl enable httpd.service
-          echo ?Hello World from $(hostname -f)? > /var/www/html/index.html
           sudo yum update -y
           sudo amazon-linux-extras install docker
           sudo service docker start
@@ -281,9 +270,9 @@ Resources:
       VpcId: !Ref VpcBookstore
 
   #################################
-  # This CF template defines 2 EC2 instances in two AZs with an ALB. This setup provides high AVAILABILITY as
+  # This CF template defines above 2 EC2 instances in two AZs with an ALB. Such setup provides HIGH AVAILABILITY as
   # traffic can be directed to a single instance in case there's a problem with the other instance or AZ.
-  # However, this setup does NOT provide high SCALABILITY. The scalable alternative would be to define an
+  # However, this setup does NOT provide HIGH SCALABILITY. The scalable alternative would be to define an
   # Auto Scaling Group (ASG). ASGs dynamically adjust the number of instances based on demand. If traffic increases,
   # it launches more instances; if demand decreases, it terminates instances.
   # ASGs require a launch template (or launch configuration), which describes the configuration for the EC2 instances.
@@ -294,50 +283,50 @@ Resources:
   # have to add the ASG as a target of the ALB.
 
   # Launch template
-  MyLaunchTemplate:
-    Type: 'AWS::EC2::LaunchTemplate'
-    Properties:
-      LaunchTemplateName: !Sub '${AWS::StackName}-launch-template-for-auto-scaling'
-      LaunchTemplateData:
-        UserData:
-          Fn::Base64:
-            !Sub |
-            #!/bin/bash
-            yum update -y
-            yum install -y httpd.x86_64
-            systemctl start httpd.service
-            systemctl enable httpd.service
-            echo ?Hello World from $(hostname -f)? > /var/www/html/index.html
-            sudo yum update -y
-            sudo amazon-linux-extras install docker
-            sudo service docker start
-            sudo usermod -a -G docker ec2-user
-            sudo chkconfig docker on
-        NetworkInterfaces:
-          - DeviceIndex: 0
-            AssociatePublicIpAddress: true
-            Groups:
-              - !Ref EC2SecurityGroup
-            DeleteOnTermination: true
-        Placement:
-          Tenancy: default
-        ImageId: !Ref LatestAmiId
-        InstanceType: !Ref InstanceType
-        KeyName: vockey
-
-  # The ASG itself
-  MyASG:
-    Type: AWS::AutoScaling::AutoScalingGroup
-    Properties:
-      LaunchTemplate:
-        LaunchTemplateId: !Ref MyLaunchTemplate
-        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
-      MaxSize: '2'
-      MinSize: '0'
-      DesiredCapacity: '0'
-      VPCZoneIdentifier:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
+#  MyLaunchTemplate:
+#    Type: 'AWS::EC2::LaunchTemplate'
+#    Properties:
+#      LaunchTemplateName: !Sub '${AWS::StackName}-launch-template-for-auto-scaling'
+#      LaunchTemplateData:
+#        UserData:
+#          Fn::Base64:
+#            !Sub |
+#            #!/bin/bash
+#            yum update -y
+#            yum install -y httpd.x86_64
+#            systemctl start httpd.service
+#            systemctl enable httpd.service
+#            echo ?Hello World from $(hostname -f)? > /var/www/html/index.html
+#            sudo yum update -y
+#            sudo amazon-linux-extras install docker
+#            sudo service docker start
+#            sudo usermod -a -G docker ec2-user
+#            sudo chkconfig docker on
+#        NetworkInterfaces:
+#          - DeviceIndex: 0
+#            AssociatePublicIpAddress: true
+#            Groups:
+#              - !Ref EC2SecurityGroup
+#            DeleteOnTermination: true
+#        Placement:
+#          Tenancy: default
+#        ImageId: !Ref LatestAmiId
+#        InstanceType: !Ref InstanceType
+#        KeyName: vockey
+#
+#  # The ASG itself
+#  MyASG:
+#    Type: AWS::AutoScaling::AutoScalingGroup
+#    Properties:
+#      LaunchTemplate:
+#        LaunchTemplateId: !Ref MyLaunchTemplate
+#        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
+#      MaxSize: '2'
+#      MinSize: '0'
+#      DesiredCapacity: '0'
+#      VPCZoneIdentifier:
+#        - !Ref PublicSubnet1
+#        - !Ref PublicSubnet2
 
   # End of ASG definition
   #################################
@@ -406,17 +395,19 @@ Resources:
       PreferredBackupWindow: 01:00-02:00
       PreferredMaintenanceWindow: mon:03:00-mon:04:00
       DBSubnetGroupName: !Ref MyDBSubnetGroup
+      Port: 3306
       VpcSecurityGroupIds:
         - !Ref DBSecurityGroup
       StorageEncrypted: true
 
+  # The DBInstanceClass should be db.t3.medium. (In 2023 we used small, but the constraints have changed.)
   DBAuroraA:
     Type: AWS::RDS::DBInstance
     Properties:
       Engine: aurora-mysql
       DBClusterIdentifier: !Ref DBClusterAuroraBookstore
-      DBInstanceClass: db.t3.small
-      DBSubnetGroupName: !Ref "MyDBSubnetGroup"
+      DBInstanceClass: db.t3.medium
+      DBSubnetGroupName: !Ref MyDBSubnetGroup
       PubliclyAccessible: false
 
   DBAuroraB:
@@ -424,7 +415,7 @@ Resources:
     Properties:
       Engine: aurora-mysql
       DBClusterIdentifier: !Ref DBClusterAuroraBookstore
-      DBInstanceClass: db.t3.small
-      DBSubnetGroupName: !Ref "MyDBSubnetGroup"
+      DBInstanceClass: db.t3.medium
+      DBSubnetGroupName: !Ref MyDBSubnetGroup
       PubliclyAccessible: false
         

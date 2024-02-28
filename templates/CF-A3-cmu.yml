@@ -7,7 +7,6 @@ Parameters:
 
   # Database credentials
   DBUsername:
-    NoEcho: 'true'
     Description: Username for database access
     Type: String
     MinLength: '1'

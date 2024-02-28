@@ -12,7 +12,6 @@ Parameters:
     ConstraintDescription: Must be a valid IP CIDR range of the form x.x.x.x/x
   # Database credentials
   DBUsername:
-    NoEcho: 'true'
     Description: Username for database access
     Type: String
     MinLength: '1'
@@ -212,11 +211,6 @@ Resources:
           !Sub |
           #!/bin/bash
           sudo -i
-          yum update -y
-          yum install -y httpd.x86_64
-          systemctl start httpd.service
-          systemctl enable httpd.service
-          echo ?Hello World from $(hostname -f)? > /var/www/html/index.html
           sudo yum update -y
           amazon-linux-extras install docker
           service docker start
@@ -247,11 +241,6 @@ Resources:
           !Sub |
           #!/bin/bash
           sudo -i
-          yum update -y
-          yum install -y httpd.x86_64
-          systemctl start httpd.service
-          systemctl enable httpd.service
-          echo ?Hello World from $(hostname -f)? > /var/www/html/index.html
           sudo yum update -y
           amazon-linux-extras install docker
           service docker start
@@ -282,11 +271,6 @@ Resources:
           !Sub |
           #!/bin/bash
           sudo -i
-          yum update -y
-          yum install -y httpd.x86_64
-          systemctl start httpd.service
-          systemctl enable httpd.service
-          echo ?Hello World from $(hostname -f)? > /var/www/html/index.html
           sudo yum update -y
           amazon-linux-extras install docker
           service docker start
@@ -393,11 +377,6 @@ Resources:
             !Sub |
             #!/bin/bash
             sudo -i
-            yum update -y
-            yum install -y httpd.x86_64
-            systemctl start httpd.service
-            systemctl enable httpd.service
-            echo ?Hello World from $(hostname -f)? > /var/www/html/index.html
             sudo yum update -y
             amazon-linux-extras install docker
             service docker start
