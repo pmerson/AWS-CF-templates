@@ -1,4 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
+
 Parameters:
   #ssh to the EC2 instance
   SSHLocation:
@@ -9,7 +10,7 @@ Parameters:
     Default: 0.0.0.0/0
     AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
     ConstraintDescription: Must be a valid IP CIDR range of the form x.x.x.x/x
-  #db login
+  # Database credentials
   DBUsername:
     Description: Username for database access
     Type: String
@@ -39,7 +40,10 @@ Parameters:
     Default: t3.micro
 
 Resources:
-  # Vpc
+
+  # VPC
+  # It's a virtual private network where within you launch resources you'll manage.
+  # There are 1+ subnets defined in a VPC. Each subnet is a range of IP addresses and is limited to a single AZ.
   VpcBookstore:
     Type: 'AWS::EC2::VPC'
     Properties:
@@ -71,6 +75,7 @@ Resources:
           Value: PublicSubnet2
 
   # Internet gateway
+  # It enables the communication between the VPC and the public Internet. It provides routing and NAT services.
   InternetGateway:
     Type: "AWS::EC2::InternetGateway"
     DependsOn: VpcBookstore
@@ -81,7 +86,6 @@ Resources:
       InternetGatewayId: !Ref "InternetGateway"
 
   # Route tables
-  #public
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -89,7 +93,8 @@ Resources:
       Tags:
         - Key: Name
           Value: Public
-  PublicRoute1: # the public route table routes directly to the IGW:
+  # The public route table routes directly to the Internet Gateway
+  PublicRoute1: 
     Type: AWS::EC2::Route
     DependsOn: VPCGatewayAttachment
     Properties:
@@ -97,14 +102,13 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
-  # Route table associated with subnets
-  # Attach the public subnets to public route tables.
-  PublicSubnetARouteTableAssociation:
+  # Route table associated with subnets. Attaches the public subnets to the public route table.
+  PublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnet1
       RouteTableId: !Ref PublicRouteTable
-  PublicSubnetBRouteTableAssociation:
+  PublicSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnet2
@@ -136,6 +140,7 @@ Resources:
           CidrIp: !Ref SSHLocation
 
   # EC2 Instances
+  # An EC2 instance launched in a VPC has a private IPv4 address and may have a public IPv4 address (Elastic IP)
   EC2BookstoreA:
     Type: 'AWS::EC2::Instance'
     Properties:
