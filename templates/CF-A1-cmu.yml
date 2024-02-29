@@ -1,6 +1,7 @@
 AWSTemplateFormatVersion: 2010-09-09
 
 Parameters:
+
   #ssh to the EC2 instance
   SSHLocation:
     Description: The IP address range that can be used to SSH to the EC2 instances
@@ -51,7 +52,8 @@ Resources:
       EnableDnsSupport: 'true'
       EnableDnsHostnames: 'true'
 
-  # Public Subnets
+  # Public subnets for EC2 instances
+  # Each subnet is in a different availability zone (AZ)
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -115,16 +117,18 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
 
   # EC2 Security Group
+  # A security group defines what inbound and outbound traffic is allowed. 
+  # Allowed traffic is specified in terms of protocols, ports and IP ranges.
   EC2SecurityGroup:
     DependsOn: VpcBookstore
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
-      GroupDescription: security group ec2 allowing http and ssh
+      GroupDescription: Security group for EC2 instances allowing http and ssh
       VpcId:
         Ref: VpcBookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
-          IpProtocol: "-1"
+          IpProtocol: "-1"  # ALL
           CidrIp: 0.0.0.0/0
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -134,13 +138,15 @@ Resources:
             Fn::GetAtt:
               - ALBSecurityGroup
               - GroupId
-        - IpProtocol: tcp  #ssh configured to your IP
+        - IpProtocol: tcp  # ssh configured to your IP
           FromPort: 22
           ToPort: 22
           CidrIp: !Ref SSHLocation
 
   # EC2 Instances
-  # An EC2 instance launched in a VPC has a private IPv4 address and may have a public IPv4 address (Elastic IP)
+  # An EC2 instance launched in a VPC has a private IPv4 address and may have a public IP address (Elastic IP).
+  # Upon initialization the EC2 instance installs and runs docker. On your own template, you may add the 
+  # instructions to pull and run your service docker images. 
   EC2BookstoreA:
     Type: 'AWS::EC2::Instance'
     Properties:
@@ -162,7 +168,7 @@ Resources:
       Tags:
         - Key: Name
           Value: EC2BookstoreA
-  MyEIP:
+  ElasticIPA:
     Type: AWS::EC2::EIP
     Properties:
       InstanceId: !Ref EC2BookstoreA
@@ -188,7 +194,7 @@ Resources:
       Tags:
         - Key: Name
           Value: EC2BookstoreB
-  MyEIP2:
+  ElasticIPB:
     Type: AWS::EC2::EIP
     Properties:
       InstanceId: !Ref EC2BookstoreB
@@ -208,11 +214,11 @@ Resources:
           IpProtocol: "-1"
           CidrIp: 0.0.0.0/0
       SecurityGroupIngress:
-        - IpProtocol: tcp   #HTTP open to world
+        - IpProtocol: tcp   # HTTP open to world
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
+        - IpProtocol: tcp   # HTTPS open to world
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
@@ -336,15 +342,18 @@ Resources:
   # End of ASG definition
   #################################
 
-  # Database
-  # db subnets
+  #
+  # Database configuration
+  #
+  
+  # Private subnets for the RDS database instances
   DBSubnet1:
     Type: 'AWS::EC2::Subnet'
     Properties:
       VpcId:
         Ref: VpcBookstore
       CidrBlock: 10.0.3.0/24
-      AvailabilityZone: us-east-1a
+      AvailabilityZone: !Select [ 0, !GetAZs "" ]
       Tags:
         - Key: name
           Value: DBSubnet1
@@ -354,21 +363,24 @@ Resources:
       VpcId:
         Ref: VpcBookstore
       CidrBlock: 10.0.5.0/24
-      AvailabilityZone: us-east-1b
+      AvailabilityZone: !Select [ 1, !GetAZs "" ]
       Tags:
         - Key: name
           Value: DBSubnet2
 
-  # Subnet group
+  # DB Subnet group
+  # It defines the subnets where RDS DB instances will reside. Each subnet should be in a separate AZ.
   MyDBSubnetGroup:
     Type: "AWS::RDS::DBSubnetGroup"
     Properties:
-      DBSubnetGroupDescription: description
+      DBSubnetGroupDescription: multi-AZ subnet group for RDS instances
       SubnetIds:
         - Ref: DBSubnet1
         - Ref: DBSubnet2
 
   # DB Security group
+  # (The DependsOn property just tells AWS that the EC2SecurityGroup needs to be created before this security group.)
+  # Port 3306 is the default TCP port used by MySQL databases.
   DBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     DependsOn: EC2SecurityGroup
@@ -381,7 +393,7 @@ Resources:
           IpProtocol: "-1"
           CidrIp: 0.0.0.0/0
       SecurityGroupIngress:
-        - IpProtocol: tcp  # port 3306 opened to the ec2 instances.
+        - IpProtocol: tcp  # port 3306 open to the EC2 instances.
           FromPort: 3306
           ToPort: 3306
           SourceSecurityGroupId:
@@ -405,7 +417,7 @@ Resources:
         - !Ref DBSecurityGroup
       StorageEncrypted: true
 
-  # The DBInstanceClass should be db.t3.medium. (In 2023 we used small, but the constraints have changed.)
+  # The DBInstanceClass should be db.t3.medium. (In 2023 we could use small, but the constraints have changed.)
   DBAuroraA:
     Type: AWS::RDS::DBInstance
     Properties:

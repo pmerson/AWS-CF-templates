@@ -1,6 +1,7 @@
 ﻿AWSTemplateFormatVersion: 2010-09-09
 
 Parameters:
+
   #ssh to the EC2 instance
   SSHLocation:
     Description: The IP address range that can be used to SSH to the EC2 instances
@@ -40,21 +41,25 @@ Parameters:
     Default: t3.micro
 
 Resources:
-  # Vpc
-  MyVPC:
+
+  # VPC
+  # It's a virtual private network where within you launch resources you'll manage.
+  # There are 1+ subnets defined in a VPC. Each subnet is a range of IP addresses and is limited to a single AZ.
+  VpcBookstore:
     Type: 'AWS::EC2::VPC'
     Properties:
       CidrBlock: 10.0.0.0/16
       EnableDnsSupport: 'true'
       EnableDnsHostnames: 'true'
 
-  # Public Subnets
+  # Public subnets for EC2 instances
+  # Each subnet is in a different availability zone (AZ)
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       AvailabilityZone: "us-east-1a"
       MapPublicIpOnLaunch: true
-      VpcId: !Ref MyVPC
+      VpcId: !Ref VpcBookstore
       CidrBlock: 10.0.0.0/24
       Tags:
         - Key: Name
@@ -65,46 +70,33 @@ Resources:
     Properties:
       AvailabilityZone: "us-east-1b"
       MapPublicIpOnLaunch: true
-      VpcId: !Ref MyVPC
+      VpcId: !Ref VpcBookstore
       CidrBlock: 10.0.20.0/24
       Tags:
         - Key: Name
           Value: PublicSubnet2
 
-  PrivateSubnet1:
-    Type: "AWS::EC2::Subnet"
-    Properties:
-      VpcId: !Ref MyVPC
-      AvailabilityZone: !Select [ 0, !GetAZs "" ]
-      CidrBlock: 10.0.3.0/24
-
-  PrivateSubnet2:
-    Type: "AWS::EC2::Subnet"
-    Properties:
-      VpcId: !Ref MyVPC
-      AvailabilityZone: !Select [ 1, !GetAZs "" ]
-      CidrBlock: 10.0.4.0/24
-
   # Internet gateway
+  # It enables the communication between the VPC and the public Internet. It provides routing and NAT services.
   InternetGateway:
     Type: "AWS::EC2::InternetGateway"
-    DependsOn: MyVPC
+    DependsOn: VpcBookstore
   VPCGatewayAttachment:
     Type: "AWS::EC2::VPCGatewayAttachment"
     Properties:
-      VpcId: !Ref MyVPC
+      VpcId: !Ref VpcBookstore
       InternetGatewayId: !Ref "InternetGateway"
 
   # Route tables
-  #public
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
-      VpcId: !Ref MyVPC
+      VpcId: !Ref VpcBookstore
       Tags:
         - Key: Name
           Value: Public
-  PublicRoute1: # the public route table routs directly to the IGW:
+  # The public route table routes directly to the Internet Gateway
+  PublicRoute1:
     Type: AWS::EC2::Route
     DependsOn: VPCGatewayAttachment
     Properties:
@@ -112,64 +104,50 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
+  # Route table associated with subnets. Attaches the public subnets to the public route table.
   PublicSubnet1RouteTableAssociation:
-    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnet1
       RouteTableId: !Ref PublicRouteTable
-
   PublicSubnet2RouteTableAssociation:
-    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnet2
       RouteTableId: !Ref PublicRouteTable
 
-  PrivateRouteTable:
-    Type: "AWS::EC2::RouteTable"
-    Properties:
-      VpcId: !Ref MyVPC
-
-  PrivateSubnet1RouteTableAssociation:
-    Type: "AWS::EC2::SubnetRouteTableAssociation"
-    Properties:
-      SubnetId: !Ref PrivateSubnet1
-      RouteTableId: !Ref PrivateRouteTable
-
-  PrivateSubnet2RouteTableAssociation:
-    Type: "AWS::EC2::SubnetRouteTableAssociation"
-    Properties:
-      SubnetId: !Ref PrivateSubnet2
-      RouteTableId: !Ref PrivateRouteTable
-
-
   # EC2 Security Group
+  # A security group defines what inbound and outbound traffic is allowed.
+  # Allowed traffic is specified in terms of protocols, ports and IP ranges.
   EC2SecurityGroup:
-    DependsOn: MyVPC
+    DependsOn: VpcBookstore
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
-      GroupDescription: security group ec2 allowing http and ssh
+      GroupDescription: Security group for EC2 instances allowing http and ssh
       VpcId:
-        Ref: MyVPC
+        Ref: VpcBookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
-          IpProtocol: "-1" #=ALL
+          IpProtocol: "-1"  # ALL
           CidrIp: 0.0.0.0/0
       SecurityGroupIngress:
-        - IpProtocol: tcp  #http configured to ALB
+        - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           SourceSecurityGroupId:
             Fn::GetAtt:
               - ALBSecurityGroup
               - GroupId
-        - IpProtocol: tcp  #ssh configured to your IP
+        - IpProtocol: tcp  # ssh configured to your IP
           FromPort: 22
           ToPort: 22
           CidrIp: !Ref SSHLocation
 
   # EC2 Instances
-
-  EC2InstanceA:
+  # An EC2 instance launched in a VPC has a private IPv4 address and may have a public IP address (Elastic IP).
+  # Upon initialization the EC2 instance installs and runs docker. On your own template, you may add the
+  # instructions to pull and run your service docker images.
+  EC2BookstoreA:
     Type: 'AWS::EC2::Instance'
     Properties:
       ImageId: ami-0d5eff06f840b45e9
@@ -185,22 +163,18 @@ Resources:
           service docker start
           usermod -a -G docker ec2-user
           chkconfig docker on
-          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
-          . ~/.nvm/nvm.sh
-          nvm install 16
       SubnetId: !Ref PublicSubnet1
       SecurityGroupIds:
         - !Ref EC2SecurityGroup
       Tags:
         - Key: Name
-          Value: EC2InstanceA
-
-  MyEIP:
+          Value: EC2BookstoreA
+  ElasticIPA:
     Type: AWS::EC2::EIP
     Properties:
-      InstanceId: !Ref EC2InstanceA
+      InstanceId: !Ref EC2BookstoreA
 
-  EC2InstanceB:
+  EC2BookstoreB:
     Type: 'AWS::EC2::Instance'
     Properties:
       ImageId: ami-0d5eff06f840b45e9
@@ -216,21 +190,18 @@ Resources:
           service docker start
           usermod -a -G docker ec2-user
           chkconfig docker on
-          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
-          . ~/.nvm/nvm.sh
-          nvm install 16
       SubnetId: !Ref PublicSubnet2
       SecurityGroupIds:
         - !Ref EC2SecurityGroup
       Tags:
         - Key: Name
-          Value: EC2InstanceB
-  MyEIP2:
+          Value: EC2BookstoreB
+  ElasticIPB:
     Type: AWS::EC2::EIP
     Properties:
-      InstanceId: !Ref EC2InstanceB
+      InstanceId: !Ref EC2BookstoreB
 
-  EC2InstanceC:
+  EC2BookstoreC:
     Type: 'AWS::EC2::Instance'
     Properties:
       ImageId: ami-0d5eff06f840b45e9
@@ -246,21 +217,18 @@ Resources:
           service docker start
           usermod -a -G docker ec2-user
           chkconfig docker on
-          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
-          . ~/.nvm/nvm.sh
-          nvm install 16
       SubnetId: !Ref PublicSubnet1
       SecurityGroupIds:
         - !Ref EC2SecurityGroup
       Tags:
         - Key: Name
-          Value: EC2InstanceC
-  MyEIP3:
+          Value: EC2BookstoreC
+  ElasticIPC:
     Type: AWS::EC2::EIP
     Properties:
-      InstanceId: !Ref EC2InstanceC
+      InstanceId: !Ref EC2BookstoreC
 
-  EC2InstanceD:
+  EC2BookstoreD:
     Type: 'AWS::EC2::Instance'
     Properties:
       ImageId: ami-0d5eff06f840b45e9
@@ -276,20 +244,19 @@ Resources:
           service docker start
           usermod -a -G docker ec2-user
           chkconfig docker on
-          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
-          . ~/.nvm/nvm.sh
-          nvm install 16
       SubnetId: !Ref PublicSubnet2
       SecurityGroupIds:
         - !Ref EC2SecurityGroup
       Tags:
         - Key: Name
-          Value: EC2InstanceD
-
-  MyEIP4:
+          Value: EC2BookstoreD
+  ElasticIPD:
     Type: AWS::EC2::EIP
     Properties:
-      InstanceId: !Ref EC2InstanceD
+      InstanceId: !Ref EC2BookstoreD
+
+  # Application Load Balancer (ALB)
+  # It's a layer 7 (application layer) load balancer. Ideal for HTTP/HTTPS traffic and microservices architectures.
 
   # ALB Security Group
   ALBSecurityGroup:
@@ -297,23 +264,23 @@ Resources:
     Properties:
       GroupName: ALB-SG
       GroupDescription: ALB Security Group
-      VpcId: !Ref MyVPC
+      VpcId: !Ref VpcBookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"
           CidrIp: 0.0.0.0/0
       SecurityGroupIngress:
-        - IpProtocol: tcp   #HTTP open to world
+        - IpProtocol: tcp   # HTTP open to world
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
+        - IpProtocol: tcp   # HTTPS open to world
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
 
-  # Load-balancer
-  MyLoadBalancer:
+  # The ALB itself
+  MyALB:
     DependsOn: VPCGatewayAttachment
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
@@ -327,10 +294,14 @@ Resources:
         - !Ref ALBSecurityGroup
 
   # ALB listener
+  # Defines the protocol/port combination that the ALB listens on for incoming requests.
+  # It checks for connection requests from clients using the configured protocol and port.
+  # Based on the rules you define, it forwards requests to one or more target groups.
+  # Each ALB requires at least one listener to accept traffic.
   HTTPListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
-      LoadBalancerArn: !Ref MyLoadBalancer
+      LoadBalancerArn: !Ref MyALB
       Port: 80
       Protocol: HTTP
       DefaultActions:
@@ -338,7 +309,10 @@ Resources:
           TargetGroupArn: !Ref EC2TargetGroup
           Type: forward
 
-  # EC2 target group
+  # ALB target group
+  # Is used to route requests to one or more registered targets (in this case EC2 instances).
+  # It acts as a logical grouping of targets. The ALB continually monitors the health of registered targets.
+  # Requests are routed to healthy targets within the target group.
   EC2TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -355,94 +329,155 @@ Resources:
         - Key: deregistration_delay.timeout_seconds
           Value: '30'
       Targets:
-        - Id: !Ref EC2InstanceA
+        - Id: !Ref EC2BookstoreA
           Port: 80
-        - Id: !Ref EC2InstanceB
+        - Id: !Ref EC2BookstoreB
           Port: 80
-        - Id: !Ref EC2InstanceC
+        - Id: !Ref EC2BookstoreC
           Port: 80
-        - Id: !Ref EC2InstanceD
+        - Id: !Ref EC2BookstoreD
           Port: 80
       UnhealthyThresholdCount: 3
-      VpcId: !Ref MyVPC
+      VpcId: !Ref VpcBookstore
+
+  #################################
+  # This CF template defines above 4 EC2 instances in two AZs with an ALB. Such setup provides HIGH AVAILABILITY as
+  # traffic can be directed to a single instance in case there's a problem with the other instance or AZ.
+  # However, this setup does NOT provide HIGH SCALABILITY. The scalable alternative would be to define an
+  # Auto Scaling Group (ASG). ASGs dynamically adjust the number of instances based on demand. If traffic increases,
+  # it launches more instances; if demand decreases, it terminates instances.
+  # ASGs require a launch template (or launch configuration), which describes the configuration for the EC2 instances.
+  # The snippet below defines a LaunchTemplate and an ASG. However, the ASG is not a target of the ALB, so it's not
+  # used.
+  #
+  # If you have time, feel free to alter your CF template to use the ASG instead of the two EC2 instances. YOu'll
+  # have to add the ASG as a target of the ALB.
 
   # Launch template
-  MyLaunchTemplate:
-    Type: 'AWS::EC2::LaunchTemplate'
-    Properties:
-      LaunchTemplateName: !Sub '${AWS::StackName}-launch-template-for-auto-scaling'
-      LaunchTemplateData:
-        UserData:
-          Fn::Base64:
-            !Sub |
-            #!/bin/bash
-            sudo -i
-            sudo yum update -y
-            amazon-linux-extras install docker
-            service docker start
-            usermod -a -G docker ec2-user
-            chkconfig docker on 
-            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
-            . ~/.nvm/nvm.sh
-            nvm install 16
-        NetworkInterfaces:
-          - DeviceIndex: 0
-            AssociatePublicIpAddress: true
-            Groups:
-              - !Ref EC2SecurityGroup
-            DeleteOnTermination: true
-        Placement:
-          Tenancy: default
-        ImageId: !Ref LatestAmiId
-        InstanceType: !Ref InstanceType
-        KeyName: vockey
+#  MyLaunchTemplate:
+#    Type: 'AWS::EC2::LaunchTemplate'
+#    Properties:
+#      LaunchTemplateName: !Sub '${AWS::StackName}-launch-template-for-auto-scaling'
+#      LaunchTemplateData:
+#        UserData:
+#          Fn::Base64:
+#            !Sub |
+#            #!/bin/bash
+#            sudo -i
+#            sudo yum update -y
+#            amazon-linux-extras install docker
+#            service docker start
+#            usermod -a -G docker ec2-user
+#            chkconfig docker on
+#            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
+#            . ~/.nvm/nvm.sh
+#            nvm install 16
+#        NetworkInterfaces:
+#          - DeviceIndex: 0
+#            AssociatePublicIpAddress: true
+#            Groups:
+#              - !Ref EC2SecurityGroup
+#            DeleteOnTermination: true
+#        Placement:
+#          Tenancy: default
+#        ImageId: !Ref LatestAmiId
+#        InstanceType: !Ref InstanceType
+#        KeyName: vockey
+#
+#  # The ASG itself
+#  MyASG:
+#    Type: AWS::AutoScaling::AutoScalingGroup
+#    Properties:
+#      LaunchTemplate:
+#        LaunchTemplateId: !Ref MyLaunchTemplate
+#        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
+#      MaxSize: '4'
+#      MinSize: '2'
+#      DesiredCapacity: '2'
+#      VPCZoneIdentifier:
+#        - !Ref PublicSubnet1
+#        - !Ref PublicSubnet2
 
-  # Auto scaling
-  myASG:
-    Type: AWS::AutoScaling::AutoScalingGroup
-    Properties:
-      LaunchTemplate:
-        LaunchTemplateId: !Ref MyLaunchTemplate
-        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
-      MaxSize: '2'
-      MinSize: '2'
-      DesiredCapacity: '2'
-      VPCZoneIdentifier:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
+  # End of ASG definition
+  #################################
 
-  #Database
+  #
+  # Database configuration
+  #
 
-  MySubnetGroup:
-    Type: 'AWS::RDS::DBSubnetGroup'
+  # Private subnets for the RDS database instances
+  DBSubnet1:
+    Type: 'AWS::EC2::Subnet'
     Properties:
-      DBSubnetGroupName: my-subnet-group2
-      DBSubnetGroupDescription: My subnet group for RDS
+      VpcId:
+        Ref: VpcBookstore
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs "" ]
+      Tags:
+        - Key: name
+          Value: DBSubnet1
+  DBSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId:
+        Ref: VpcBookstore
+      CidrBlock: 10.0.5.0/24
+      AvailabilityZone: !Select [ 1, !GetAZs "" ]
+      Tags:
+        - Key: name
+          Value: DBSubnet2
+
+#  PrivateRouteTable:
+#    Type: "AWS::EC2::RouteTable"
+#    Properties:
+#      VpcId: !Ref VpcBookstore
+#
+#  PrivateSubnet1RouteTableAssociation:
+#    Type: "AWS::EC2::SubnetRouteTableAssociation"
+#    Properties:
+#      SubnetId: !Ref DBSubnet1
+#      RouteTableId: !Ref PrivateRouteTable
+#  PrivateSubnet2RouteTableAssociation:
+#    Type: "AWS::EC2::SubnetRouteTableAssociation"
+#    Properties:
+#      SubnetId: !Ref DBSubnet2
+#      RouteTableId: !Ref PrivateRouteTable
+
+  # DB Subnet group
+  # It defines the subnets where RDS DB instances will reside. Each subnet should be in a separate AZ.
+  MyDBSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupDescription: multi-AZ subnet group for RDS instances
       SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
+        - Ref: DBSubnet1
+        - Ref: DBSubnet2
 
   # DB Security group
-  DBEC2SecurityGroup:
+  # (The DependsOn property just tells AWS that the EC2SecurityGroup needs to be created before this security group.)
+  # Port 3306 is the default TCP port used by MySQL databases.
+  DBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     DependsOn: EC2SecurityGroup
     Properties:
       VpcId:
-        Ref: MyVPC
+        Ref: VpcBookstore
       GroupDescription: Open database for access
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"
           CidrIp: 0.0.0.0/0
       SecurityGroupIngress:
-        - IpProtocol: tcp  # port 3306 opened to the ec2 instances.
+        - IpProtocol: tcp  # port 3306 open to the EC2 instances.
           FromPort: 3306
           ToPort: 3306
           SourceSecurityGroupId:
             Ref: EC2SecurityGroup
 
-  # RDS Aurora cluster (MySQL)
-  DatabaseCluster:
+  # RDS Aurora cluster
+  # By declaring two DB instances in the cluster, Aurora will make the 1st instance the primary and the second the
+  # replica, and will manage the primary/replica roles automatically from then on.
+  DBClusterAuroraBookstore:
     Type: AWS::RDS::DBCluster
     Properties:
       Engine: aurora-mysql
@@ -451,25 +486,28 @@ Resources:
       BackupRetentionPeriod: '7'
       PreferredBackupWindow: 01:00-02:00
       PreferredMaintenanceWindow: mon:03:00-mon:04:00
-      DBSubnetGroupName: !Ref MySubnetGroup
+      DBSubnetGroupName: !Ref MyDBSubnetGroup
+      Port: 3306
       VpcSecurityGroupIds:
-        - !Ref DBEC2SecurityGroup
+        - !Ref DBSecurityGroup
       StorageEncrypted: true
 
-  DatabasePrimaryInstance:
+  # The DBInstanceClass should be db.t3.medium. (In 2023 we could use small, but the constraints have changed.)
+  DBAuroraA:
     Type: AWS::RDS::DBInstance
     Properties:
       Engine: aurora-mysql
-      DBClusterIdentifier: !Ref "DatabaseCluster"
-      DBInstanceClass: db.t3.small
-      DBSubnetGroupName: !Ref MySubnetGroup
+      DBClusterIdentifier: !Ref DBClusterAuroraBookstore
+      DBInstanceClass: db.t3.medium
+      DBSubnetGroupName: !Ref MyDBSubnetGroup
       PubliclyAccessible: false
 
-  DatabaseReplicaInstance:
+  DBAuroraB:
     Type: AWS::RDS::DBInstance
     Properties:
       Engine: aurora-mysql
-      DBClusterIdentifier: !Ref "DatabaseCluster"
-      DBInstanceClass: db.t3.small
-      DBSubnetGroupName: !Ref MySubnetGroup
+      DBClusterIdentifier: !Ref DBClusterAuroraBookstore
+      DBInstanceClass: db.t3.medium
+      DBSubnetGroupName: !Ref MyDBSubnetGroup
       PubliclyAccessible: false
+
