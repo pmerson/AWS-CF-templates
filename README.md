@@ -22,9 +22,9 @@ Example of application design that could be deployed to this infrastructure.
 ![notation key](/images/notation-key-runtime-views.jpg)
 
 
-## Multiple EC2 and RDS cluster
+## Multiple EC2 instances, routing based on HTTP header, and RDS cluster
 
-The [CF template](/templates/CF-A2-cmu.yml).
+The [CF template](/templates/CF-A2-cmu.yml). (The routing rules might be incomplete, but you can easily fix them.)
 
 AWS deployment diagram (using [AWS notation](https://aws.amazon.com/architecture/icons/)).
 

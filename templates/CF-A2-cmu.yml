@@ -143,10 +143,54 @@ Resources:
           ToPort: 22
           CidrIp: !Ref SSHLocation
 
+  # Application Load Balancer (ALB)
+  # It's a layer 7 (application layer) load balancer. Ideal for HTTP/HTTPS traffic and microservices architectures.
+
+  # ALB Security Group
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ALB-SG
+      GroupDescription: ALB Security Group
+      VpcId: !Ref VpcBookstore
+      SecurityGroupEgress:
+        - Description: Allow all outbound traffic
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      SecurityGroupIngress:
+        - IpProtocol: tcp   # HTTP 80 open to world
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp   # HTTPS 443 open to world
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+#        - IpProtocol: tcp  # HTTP 3000 from within
+#          FromPort: 3000
+#          ToPort: 3000
+#          SourceSecurityGroupId:
+#            Ref: EC2SecurityGroup
+#        - IpProtocol: tcp   # HTTP 3000 from within
+#          FromPort: 3000
+#          ToPort: 3000
+#          SourceSecurityGroupId: !GetAtt MyALB.SecurityGroups[0]
+
+  # The ALB itself
+  MyALB:
+    DependsOn: VPCGatewayAttachment
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: ALB
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+
   # EC2 Instances
-  # An EC2 instance launched in a VPC has a private IPv4 address and may have a public IP address (Elastic IP).
-  # Upon initialization the EC2 instance installs and runs docker. On your own template, you may add the
-  # instructions to pull and run your service docker images.
   EC2BookstoreA:
     Type: 'AWS::EC2::Instance'
     Properties:
@@ -255,65 +299,10 @@ Resources:
     Properties:
       InstanceId: !Ref EC2BookstoreD
 
-  # Application Load Balancer (ALB)
-  # It's a layer 7 (application layer) load balancer. Ideal for HTTP/HTTPS traffic and microservices architectures.
 
-  # ALB Security Group
-  ALBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupName: ALB-SG
-      GroupDescription: ALB Security Group
-      VpcId: !Ref VpcBookstore
-      SecurityGroupEgress:
-        - Description: Allow all outbound traffic
-          IpProtocol: "-1"
-          CidrIp: 0.0.0.0/0
-      SecurityGroupIngress:
-        - IpProtocol: tcp   # HTTP open to world
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp   # HTTPS open to world
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-
-  # The ALB itself
-  MyALB:
-    DependsOn: VPCGatewayAttachment
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      Name: ALB
-      Scheme: internet-facing
-      Type: application
-      Subnets:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
-      SecurityGroups:
-        - !Ref ALBSecurityGroup
-
-  # ALB listener
-  # Defines the protocol/port combination that the ALB listens on for incoming requests.
-  # It checks for connection requests from clients using the configured protocol and port.
-  # Based on the rules you define, it forwards requests to one or more target groups.
-  # Each ALB requires at least one listener to accept traffic.
-  HTTPListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref MyALB
-      Port: 80
-      Protocol: HTTP
-      DefaultActions:
-        - Order: 1
-          TargetGroupArn: !Ref EC2TargetGroup
-          Type: forward
-
-  # ALB target group
-  # Is used to route requests to one or more registered targets (in this case EC2 instances).
-  # It acts as a logical grouping of targets. The ALB continually monitors the health of registered targets.
-  # Requests are routed to healthy targets within the target group.
-  EC2TargetGroup:
+  # Target group for the Web App BFF
+  # Instances EC2BookstoreA and EC2BookstoreB from two AZs.
+  WebBFFTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       HealthCheckIntervalSeconds: 30
@@ -322,7 +311,7 @@ Resources:
       HealthyThresholdCount: 5
       Matcher:
         HttpCode: '200'
-      Name: EC2TargetGroup
+      Name: WebBFFTargetGroup
       Port: 80
       Protocol: HTTP
       TargetGroupAttributes:
@@ -333,12 +322,124 @@ Resources:
           Port: 80
         - Id: !Ref EC2BookstoreB
           Port: 80
+      UnhealthyThresholdCount: 3
+      VpcId: !Ref VpcBookstore
+
+  # Target group for the Web App BFF
+  # Instances EC2BookstoreC and EC2BookstoreD from two AZs.
+  MobileBFFTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 15
+      HealthyThresholdCount: 5
+      Matcher:
+        HttpCode: '200'
+      Name: MobileBFFTargetGroup
+      Port: 80
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      Targets:
         - Id: !Ref EC2BookstoreC
           Port: 80
         - Id: !Ref EC2BookstoreD
           Port: 80
       UnhealthyThresholdCount: 3
       VpcId: !Ref VpcBookstore
+
+  # Target group for backend services (that are called by the BFF services).
+  # All four EC2 instances.
+  BackendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 15
+      HealthyThresholdCount: 5
+      Matcher:
+        HttpCode: '200'
+      Name: BackendTargetGroup
+      Port: 3000
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      Targets:
+        - Id: !Ref EC2BookstoreA
+          Port: 3000
+        - Id: !Ref EC2BookstoreB
+          Port: 3000
+        - Id: !Ref EC2BookstoreC
+          Port: 3000
+        - Id: !Ref EC2BookstoreD
+          Port: 3000
+      UnhealthyThresholdCount: 3
+      VpcId: !Ref VpcBookstore
+
+
+  # ListenerRule that defines the routing condition for Web app clients.
+  WebClientListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref WebBFFTargetGroup
+      Conditions:
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName: X-Client-Type
+            Values:
+              - Web app
+      ListenerArn: !Ref HTTPListener
+      Priority: 1
+
+  # ListenerRule that defines the routing condition for Web app clients.
+  MobileClientListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref MobileBFFTargetGroup
+      Conditions:
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName: X-Client-Type
+            Values:
+              - iOS app
+              - Android app
+      ListenerArn: !Ref HTTPListener
+      Priority: 2
+
+  # Listener for port 80
+  # DefaultActions are executed if no listener rule matches the incoming request.
+  HTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref MyALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: 400
+            ContentType: text/plain
+            MessageBody: "Request missing X-Client-Type header"
+
+  # Listener for the backend services (that are called by the BFF services)
+  BackendListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref MyALB
+      Port: 3000
+      Protocol: HTTP
+      DefaultActions:
+        - Order: 1
+          TargetGroupArn: !Ref BackendTargetGroup
+          Type: forward
+
 
   #################################
   # This CF template defines above 4 EC2 instances in two AZs with an ALB. Such setup provides HIGH AVAILABILITY as
