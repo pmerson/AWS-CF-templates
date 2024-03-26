@@ -123,9 +123,9 @@ Resources:
     DependsOn: VpcBookstore
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
+      GroupName: EC2SecurityGroup
       GroupDescription: Security group for EC2 instances allowing http and ssh
-      VpcId:
-        Ref: VpcBookstore
+      VpcId: !Ref VpcBookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"  # ALL
@@ -135,13 +135,16 @@ Resources:
           FromPort: 80
           ToPort: 80
           SourceSecurityGroupId:
-            Fn::GetAtt:
-              - ALBSecurityGroup
-              - GroupId
+            Ref: ALBSecurityGroup
         - IpProtocol: tcp  # ssh configured to your IP
           FromPort: 22
           ToPort: 22
           CidrIp: !Ref SSHLocation
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId:
+            Ref: ALBSecurityGroup
 
   # Application Load Balancer (ALB)
   # It's a layer 7 (application layer) load balancer. Ideal for HTTP/HTTPS traffic and microservices architectures.
@@ -150,8 +153,8 @@ Resources:
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: ALB-SG
-      GroupDescription: ALB Security Group
+      GroupName: ALBSecurityGroup
+      GroupDescription: ALB Security Group allowing 80 from anywhare and 3000 from VPC
       VpcId: !Ref VpcBookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
@@ -166,22 +169,17 @@ Resources:
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
-#        - IpProtocol: tcp  # HTTP 3000 from within
-#          FromPort: 3000
-#          ToPort: 3000
-#          SourceSecurityGroupId:
-#            Ref: EC2SecurityGroup
-#        - IpProtocol: tcp   # HTTP 3000 from within
-#          FromPort: 3000
-#          ToPort: 3000
-#          SourceSecurityGroupId: !GetAtt MyALB.SecurityGroups[0]
+        - IpProtocol: tcp  # HTTP 3000 from within
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: !GetAtt VpcBookstore.CidrBlock
 
   # The ALB itself
   MyALB:
     DependsOn: VPCGatewayAttachment
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: ALB
+      Name: MyALB
       Scheme: internet-facing
       Type: application
       Subnets:
@@ -379,7 +377,6 @@ Resources:
       UnhealthyThresholdCount: 3
       VpcId: !Ref VpcBookstore
 
-
   # ListenerRule that defines the routing condition for Web app clients.
   WebClientListenerRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
@@ -396,23 +393,6 @@ Resources:
       ListenerArn: !Ref HTTPListener
       Priority: 1
 
-  # ListenerRule that defines the routing condition for Web app clients.
-  MobileClientListenerRule:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      Actions:
-        - Type: forward
-          TargetGroupArn: !Ref MobileBFFTargetGroup
-      Conditions:
-        - Field: http-header
-          HttpHeaderConfig:
-            HttpHeaderName: X-Client-Type
-            Values:
-              - iOS app
-              - Android app
-      ListenerArn: !Ref HTTPListener
-      Priority: 2
-
   # Listener for port 80
   # DefaultActions are executed if no listener rule matches the incoming request.
   HTTPListener:
@@ -428,7 +408,24 @@ Resources:
             ContentType: text/plain
             MessageBody: "Request missing X-Client-Type header"
 
-  # Listener for the backend services (that are called by the BFF services)
+  # ListenerRule that defines the routing condition for Web app clients.
+  BackendListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref BackendTargetGroup
+      Conditions:
+        - Field: source-ip
+          SourceIpConfig:
+            Values:
+              - Fn::GetAtt:
+                  - VpcBookstore
+                  - CidrBlock
+      ListenerArn: !Ref BackendListener
+      Priority: 3
+
+    # Listener for the backend services (that are called by the BFF services)
   BackendListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -455,49 +452,49 @@ Resources:
   # have to add the ASG as a target of the ALB.
 
   # Launch template
-#  MyLaunchTemplate:
-#    Type: 'AWS::EC2::LaunchTemplate'
-#    Properties:
-#      LaunchTemplateName: !Sub '${AWS::StackName}-launch-template-for-auto-scaling'
-#      LaunchTemplateData:
-#        UserData:
-#          Fn::Base64:
-#            !Sub |
-#            #!/bin/bash
-#            sudo -i
-#            sudo yum update -y
-#            amazon-linux-extras install docker
-#            service docker start
-#            usermod -a -G docker ec2-user
-#            chkconfig docker on
-#            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
-#            . ~/.nvm/nvm.sh
-#            nvm install 16
-#        NetworkInterfaces:
-#          - DeviceIndex: 0
-#            AssociatePublicIpAddress: true
-#            Groups:
-#              - !Ref EC2SecurityGroup
-#            DeleteOnTermination: true
-#        Placement:
-#          Tenancy: default
-#        ImageId: !Ref LatestAmiId
-#        InstanceType: !Ref InstanceType
-#        KeyName: vockey
-#
-#  # The ASG itself
-#  MyASG:
-#    Type: AWS::AutoScaling::AutoScalingGroup
-#    Properties:
-#      LaunchTemplate:
-#        LaunchTemplateId: !Ref MyLaunchTemplate
-#        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
-#      MaxSize: '4'
-#      MinSize: '2'
-#      DesiredCapacity: '2'
-#      VPCZoneIdentifier:
-#        - !Ref PublicSubnet1
-#        - !Ref PublicSubnet2
+  #  MyLaunchTemplate:
+  #    Type: 'AWS::EC2::LaunchTemplate'
+  #    Properties:
+  #      LaunchTemplateName: !Sub '${AWS::StackName}-launch-template-for-auto-scaling'
+  #      LaunchTemplateData:
+  #        UserData:
+  #          Fn::Base64:
+  #            !Sub |
+  #            #!/bin/bash
+  #            sudo -i
+  #            sudo yum update -y
+  #            amazon-linux-extras install docker
+  #            service docker start
+  #            usermod -a -G docker ec2-user
+  #            chkconfig docker on
+  #            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
+  #            . ~/.nvm/nvm.sh
+  #            nvm install 16
+  #        NetworkInterfaces:
+  #          - DeviceIndex: 0
+  #            AssociatePublicIpAddress: true
+  #            Groups:
+  #              - !Ref EC2SecurityGroup
+  #            DeleteOnTermination: true
+  #        Placement:
+  #          Tenancy: default
+  #        ImageId: !Ref LatestAmiId
+  #        InstanceType: !Ref InstanceType
+  #        KeyName: vockey
+  #
+  #  # The ASG itself
+  #  MyASG:
+  #    Type: AWS::AutoScaling::AutoScalingGroup
+  #    Properties:
+  #      LaunchTemplate:
+  #        LaunchTemplateId: !Ref MyLaunchTemplate
+  #        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
+  #      MaxSize: '4'
+  #      MinSize: '2'
+  #      DesiredCapacity: '2'
+  #      VPCZoneIdentifier:
+  #        - !Ref PublicSubnet1
+  #        - !Ref PublicSubnet2
 
   # End of ASG definition
   #################################
@@ -528,21 +525,21 @@ Resources:
         - Key: name
           Value: DBSubnet2
 
-#  PrivateRouteTable:
-#    Type: "AWS::EC2::RouteTable"
-#    Properties:
-#      VpcId: !Ref VpcBookstore
-#
-#  PrivateSubnet1RouteTableAssociation:
-#    Type: "AWS::EC2::SubnetRouteTableAssociation"
-#    Properties:
-#      SubnetId: !Ref DBSubnet1
-#      RouteTableId: !Ref PrivateRouteTable
-#  PrivateSubnet2RouteTableAssociation:
-#    Type: "AWS::EC2::SubnetRouteTableAssociation"
-#    Properties:
-#      SubnetId: !Ref DBSubnet2
-#      RouteTableId: !Ref PrivateRouteTable
+  #  PrivateRouteTable:
+  #    Type: "AWS::EC2::RouteTable"
+  #    Properties:
+  #      VpcId: !Ref VpcBookstore
+  #
+  #  PrivateSubnet1RouteTableAssociation:
+  #    Type: "AWS::EC2::SubnetRouteTableAssociation"
+  #    Properties:
+  #      SubnetId: !Ref DBSubnet1
+  #      RouteTableId: !Ref PrivateRouteTable
+  #  PrivateSubnet2RouteTableAssociation:
+  #    Type: "AWS::EC2::SubnetRouteTableAssociation"
+  #    Properties:
+  #      SubnetId: !Ref DBSubnet2
+  #      RouteTableId: !Ref PrivateRouteTable
 
   # DB Subnet group
   # It defines the subnets where RDS DB instances will reside. Each subnet should be in a separate AZ.
@@ -561,9 +558,9 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     DependsOn: EC2SecurityGroup
     Properties:
-      VpcId:
-        Ref: VpcBookstore
+      GroupName: DBSecurityGroup
       GroupDescription: Open database for access
+      VpcId: !Ref VpcBookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"
