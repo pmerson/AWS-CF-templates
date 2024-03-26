@@ -123,9 +123,9 @@ Resources:
     DependsOn: VpcBookstore
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
+      GroupName: EC2SecurityGroup
       GroupDescription: Security group for EC2 instances allowing http and ssh
-      VpcId:
-        Ref: VpcBookstore
+      VpcId: !Ref VpcBookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"  # ALL
@@ -206,8 +206,8 @@ Resources:
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: ALB-SG
-      GroupDescription: ALB Security Group
+      GroupName: ALBSecurityGroup
+      GroupDescription: ALB Security Group allowing 80 from anywhere
       VpcId: !Ref VpcBookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
@@ -223,12 +223,12 @@ Resources:
           ToPort: 443
           CidrIp: 0.0.0.0/0
 
-  # The ALB itself
+  # The ALB itself for Internet facing traffic
   MyALB:
     DependsOn: VPCGatewayAttachment
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: ALB
+      Name: MyALB
       Scheme: internet-facing
       Type: application
       Subnets:
@@ -385,9 +385,9 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     DependsOn: EC2SecurityGroup
     Properties:
-      VpcId:
-        Ref: VpcBookstore
+      GroupName: DBSecurityGroup
       GroupDescription: Open database for access
+      VpcId: !Ref VpcBookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"
