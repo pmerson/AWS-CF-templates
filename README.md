@@ -22,7 +22,7 @@ Example of application design that could be deployed to this infrastructure.
 ![notation key](/images/notation-key-runtime-views.jpg)
 
 
-## Multiple EC2 instances, routing based on HTTP header, and RDS cluster
+## Multiple EC2 instances, routing based on HTTP header, BFFs, and RDS cluster
 
 The [CF template](/templates/CF-A2-cmu.yml). (The routing rules might be incomplete, but you can easily fix them.)
 
@@ -35,6 +35,14 @@ Example of application design that could be deployed to this infrastructure.
 
 ![runtime view diagram](/images/a2-runtime-view.jpg)
 
+The mapping of microservices to EC2 instances could be the one in this table. The CF template has target groups corresponding to these subsets of instances.
+
+| Service | EC2 instances it should be deployed to |
+|---------|----------------------------------------|
+| Book store web app BFF (port 80)       | EC2BookstoreA, EC2BookstoreB           |
+| Book store mobile app BFF (port 80)       | EC2BookstoreC, EC2BookstoreD           |
+| Customer service (port 3000)       | EC2BookstoreA, EC2BookstoreD   |
+| Book service (port 3000)       | EC2BookstoreB, EC2BookstoreC       |
 
 
 ## EKS cluster and RDS cluster
