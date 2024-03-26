@@ -135,7 +135,7 @@ Resources:
           FromPort: 80
           ToPort: 80
           SourceSecurityGroupId:
-            Ref: ALBSecurityGroup
+            Ref: ExternalALBSecurityGroup
         - IpProtocol: tcp  # ssh configured to your IP
           FromPort: 22
           ToPort: 22
@@ -144,17 +144,16 @@ Resources:
           FromPort: 3000
           ToPort: 3000
           SourceSecurityGroupId:
-            Ref: ALBSecurityGroup
+            Ref: InternalALBSecurityGroup
 
-  # Application Load Balancer (ALB)
+  # Application Load Balancers (ALB)
   # It's a layer 7 (application layer) load balancer. Ideal for HTTP/HTTPS traffic and microservices architectures.
 
-  # ALB Security Group
-  ALBSecurityGroup:
+  ExternalALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: ALBSecurityGroup
-      GroupDescription: ALB Security Group allowing 80 from anywhare and 3000 from VPC
+      GroupName: ExternalALBSecurityGroup
+      GroupDescription: ALB Security Group allowing 80 from anywhere
       VpcId: !Ref VpcBookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
@@ -169,24 +168,51 @@ Resources:
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp  # HTTP 3000 from within
-          FromPort: 3000
-          ToPort: 3000
-          CidrIp: !GetAtt VpcBookstore.CidrBlock
 
-  # The ALB itself
-  MyALB:
+  # The ALB for Internet facing traffic
+  ExternalALB:
     DependsOn: VPCGatewayAttachment
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: MyALB
+      Name: ExternalALB
       Scheme: internet-facing
       Type: application
       Subnets:
         - !Ref PublicSubnet1
         - !Ref PublicSubnet2
       SecurityGroups:
-        - !Ref ALBSecurityGroup
+        - !Ref ExternalALBSecurityGroup
+
+  InternalALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: InternalALBSecurityGroup
+      GroupDescription: ALB Security Group allowing port 3000 from within
+      VpcId: !Ref VpcBookstore
+      SecurityGroupEgress:
+        - Description: Allow all outbound traffic
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      SecurityGroupIngress:
+        - IpProtocol: tcp  # HTTP 3000 from within
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: !GetAtt VpcBookstore.CidrBlock
+
+  # The ALB for Internet facing traffic
+  InternalALB:
+    DependsOn: VPCGatewayAttachment
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: InternalALB
+      Scheme: internal
+      Type: application
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref InternalALBSecurityGroup
+
 
   # EC2 Instances
   EC2BookstoreA:
@@ -348,9 +374,9 @@ Resources:
       UnhealthyThresholdCount: 3
       VpcId: !Ref VpcBookstore
 
-  # Target group for backend services (that are called by the BFF services).
-  # All four EC2 instances.
-  BackendTargetGroup:
+  # Target group for the backend CUSTOMER service.
+  # Instances EC2BookstoreA and EC2BookstoreD from two AZs.
+  CustomerServiceTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       HealthCheckIntervalSeconds: 30
@@ -359,7 +385,7 @@ Resources:
       HealthyThresholdCount: 5
       Matcher:
         HttpCode: '200'
-      Name: BackendTargetGroup
+      Name: CustomerServiceTargetGroup
       Port: 3000
       Protocol: HTTP
       TargetGroupAttributes:
@@ -368,11 +394,32 @@ Resources:
       Targets:
         - Id: !Ref EC2BookstoreA
           Port: 3000
+        - Id: !Ref EC2BookstoreD
+          Port: 3000
+      UnhealthyThresholdCount: 3
+      VpcId: !Ref VpcBookstore
+
+  # Target group for the backend BOOK service.
+  # Instances EC2BookstoreA and EC2BookstoreD from two AZs.
+  BookServiceTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 15
+      HealthyThresholdCount: 5
+      Matcher:
+        HttpCode: '200'
+      Name: BookServiceTargetGroup
+      Port: 3000
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      Targets:
         - Id: !Ref EC2BookstoreB
           Port: 3000
         - Id: !Ref EC2BookstoreC
-          Port: 3000
-        - Id: !Ref EC2BookstoreD
           Port: 3000
       UnhealthyThresholdCount: 3
       VpcId: !Ref VpcBookstore
@@ -398,7 +445,7 @@ Resources:
   HTTPListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
-      LoadBalancerArn: !Ref MyALB
+      LoadBalancerArn: !Ref ExternalALB
       Port: 80
       Protocol: HTTP
       DefaultActions:
@@ -408,34 +455,61 @@ Resources:
             ContentType: text/plain
             MessageBody: "Request missing X-Client-Type header"
 
-  # ListenerRule that defines the routing condition for Web app clients.
-  BackendListenerRule:
+  # ListenerRule that defines the routing condition for calling the CUSTOMER Service.
+  # Change the path-pattern value as necessary (ex.: /api/customers/*)
+  CustomerServiceListenerRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
       Actions:
         - Type: forward
-          TargetGroupArn: !Ref BackendTargetGroup
+          TargetGroupArn: !Ref CustomerServiceTargetGroup
       Conditions:
+        - Field: path-pattern
+          Values:
+            - /customers/*
         - Field: source-ip
           SourceIpConfig:
             Values:
               - Fn::GetAtt:
                   - VpcBookstore
                   - CidrBlock
-      ListenerArn: !Ref BackendListener
+      ListenerArn: !Ref BackendServiceListener
+      Priority: 2
+
+  # ListenerRule that defines the routing condition for calling the BOOK Service.
+  # Change the path-pattern value as necessary (ex.: /api/books/*)
+  BookServiceListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref BookServiceTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /books/*
+        - Field: source-ip
+          SourceIpConfig:
+            Values:
+              - Fn::GetAtt:
+                  - VpcBookstore
+                  - CidrBlock
+      ListenerArn: !Ref BackendServiceListener
       Priority: 3
 
-    # Listener for the backend services (that are called by the BFF services)
-  BackendListener:
+  # Listener for the backend services (Customer and Book) called only from within the VPC.
+  BackendServiceListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
-      LoadBalancerArn: !Ref MyALB
+      LoadBalancerArn: !Ref InternalALB
       Port: 3000
       Protocol: HTTP
       DefaultActions:
-        - Order: 1
-          TargetGroupArn: !Ref BackendTargetGroup
-          Type: forward
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: 404
+            ContentType: text/plain
+            MessageBody: "Nah, I don't have anything at that location."
 
 
   #################################
