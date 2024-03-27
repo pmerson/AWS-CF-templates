@@ -436,7 +436,7 @@ Resources:
           HttpHeaderConfig:
             HttpHeaderName: X-Client-Type
             Values:
-              - Web app
+              - Web
       ListenerArn: !Ref HTTPListener
       Priority: 1
 
