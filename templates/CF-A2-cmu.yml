@@ -466,7 +466,7 @@ Resources:
       Conditions:
         - Field: path-pattern
           Values:
-            - /customers/*
+            - /customers*
         - Field: source-ip
           SourceIpConfig:
             Values:
@@ -487,7 +487,7 @@ Resources:
       Conditions:
         - Field: path-pattern
           Values:
-            - /books/*
+            - /books*
         - Field: source-ip
           SourceIpConfig:
             Values:
