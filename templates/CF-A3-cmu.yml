@@ -3,7 +3,7 @@ Parameters:
 
   LabRoleARN:
     Type: String
-    Description: Enter the ARN for LabRole (IAM | Roles | click on LabRole | copy ARN)
+    Description: "Enter the ARN for LabRole you find here: IAM | Roles | click on LabRole | copy ARN"
 
   # Database credentials
   DBUsername:
@@ -62,10 +62,10 @@ Metadata:
 
 Resources:
 
-  ##
-  ## Networking
-  ##
-  VPC:
+  # VPC
+  # It's a virtual private network where within you launch resources you'll manage.
+  # There are 1+ subnets defined in a VPC. Each subnet is a range of IP addresses and is limited to a single AZ.
+  VpcBookstore:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock:  !Ref VpcBlock
@@ -73,21 +73,23 @@ Resources:
       EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-VPC'
+          Value: !Sub '${AWS::StackName}-VpcBookstore'
 
+  # Internet gateway
+  # It enables the communication between the VPC and the public Internet. It provides routing and NAT services.
   InternetGateway:
     Type: "AWS::EC2::InternetGateway"
-
   VPCGatewayAttachment:
     Type: "AWS::EC2::VPCGatewayAttachment"
     Properties:
       InternetGatewayId: !Ref InternetGateway
-      VpcId: !Ref VPC
+      VpcId: !Ref VpcBookstore
 
+  # Route tables
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
-      VpcId: !Ref VPC
+      VpcId: !Ref VpcBookstore
       Tags:
         - Key: Name
           Value: Public Subnets
@@ -97,7 +99,7 @@ Resources:
   PrivateRouteTable01:
     Type: AWS::EC2::RouteTable
     Properties:
-      VpcId: !Ref VPC
+      VpcId: !Ref VpcBookstore
       Tags:
         - Key: Name
           Value: Private Subnet AZ1
@@ -107,13 +109,14 @@ Resources:
   PrivateRouteTable02:
     Type: AWS::EC2::RouteTable
     Properties:
-      VpcId: !Ref VPC
+      VpcId: !Ref VpcBookstore
       Tags:
         - Key: Name
           Value: Private Subnet AZ2
         - Key: Network
           Value: Private02
 
+  # The public route table routes directly to the Internet Gateway
   PublicRoute:
     DependsOn: VPCGatewayAttachment
     Type: AWS::EC2::Route
@@ -182,6 +185,8 @@ Resources:
     Properties:
       Domain: vpc
 
+  # Public subnets for the K8S nodes
+  # Each subnet is in a different availability zone (AZ)
   PublicSubnet01:
     Type: AWS::EC2::Subnet
     Metadata:
@@ -196,7 +201,7 @@ Resources:
       CidrBlock:
         Ref: PublicSubnet01Block
       VpcId:
-        Ref: VPC
+        Ref: VpcBookstore
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-PublicSubnet01"
@@ -217,7 +222,7 @@ Resources:
       CidrBlock:
         Ref: PublicSubnet02Block
       VpcId:
-        Ref: VPC
+        Ref: VpcBookstore
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-PublicSubnet02"
@@ -237,7 +242,7 @@ Resources:
       CidrBlock:
         Ref: PrivateSubnet01Block
       VpcId:
-        Ref: VPC
+        Ref: VpcBookstore
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-PrivateSubnet01"
@@ -257,13 +262,14 @@ Resources:
       CidrBlock:
         Ref: PrivateSubnet02Block
       VpcId:
-        Ref: VPC
+        Ref: VpcBookstore
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-PrivateSubnet02"
         - Key: kubernetes.io/role/internal-elb
           Value: 1
 
+  # Route table associated with subnets. Attaches a public subnets to a public route table.
   PublicSubnet01RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -293,7 +299,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Cluster communication with worker nodes
-      VpcId: !Ref VPC
+      VpcId: !Ref VpcBookstore
 
 
   ##
@@ -327,14 +333,13 @@ Resources:
       ScalingConfig:
         DesiredSize: 4
         MaxSize: 5
-        MinSize: 1
+        MinSize: 2
       InstanceTypes:
         - t2.micro
 
 
-  ##
-  ## Database cluster
-  ##
+  # DB Subnet group
+  # It defines the subnets where RDS DB instances will reside. Each subnet should be in a separate AZ.
   MyDBSubnetGroup:
     Type: 'AWS::RDS::DBSubnetGroup'
     Properties:
@@ -345,13 +350,13 @@ Resources:
         - !Ref PrivateSubnet02
 
   # DB Security group
-  DBEC2SecurityGroup:
+  # Port 3306 is the default TCP port used by MySQL databases.
+  DBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
-    #    DependsOn: EC2SecurityGroup
     Properties:
-      VpcId:
-        Ref: VPC
+      GroupName: DBSecurityGroup
       GroupDescription: Open database for access
+      VpcId: !Ref VpcBookstore
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"
@@ -363,8 +368,10 @@ Resources:
           SourceSecurityGroupId:
             Ref: ControlPlaneSecurityGroup
 
-  # RDS Aurora cluster (MySQL)
-  DatabaseCluster:
+  # RDS Aurora cluster
+  # By declaring two DB instances in the cluster, Aurora will make the 1st instance the primary and the second the
+  # replica, and will manage the primary/replica roles automatically from then on.
+  DBClusterAuroraBookstore:
     Type: AWS::RDS::DBCluster
     Properties:
       Engine: aurora-mysql
@@ -374,25 +381,26 @@ Resources:
       PreferredBackupWindow: 01:00-02:00
       PreferredMaintenanceWindow: mon:03:00-mon:04:00
       DBSubnetGroupName: !Ref MyDBSubnetGroup
+      Port: 3306
       VpcSecurityGroupIds:
-        - !Ref DBEC2SecurityGroup
+        - !Ref DBSecurityGroup
       StorageEncrypted: true
 
-  DatabasePrimaryInstance:
+  DBAuroraA:
     Type: AWS::RDS::DBInstance
     Properties:
       Engine: aurora-mysql
-      DBClusterIdentifier: !Ref "DatabaseCluster"
-      DBInstanceClass: db.t3.small
+      DBClusterIdentifier: !Ref DBClusterAuroraBookstore
+      DBInstanceClass: db.t3.medium
       DBSubnetGroupName: !Ref MyDBSubnetGroup
       PubliclyAccessible: false
 
-  DatabaseReplicaInstance:
+  DBAuroraB:
     Type: AWS::RDS::DBInstance
     Properties:
       Engine: aurora-mysql
-      DBClusterIdentifier: !Ref "DatabaseCluster"
-      DBInstanceClass: db.t3.small
+      DBClusterIdentifier: !Ref DBClusterAuroraBookstore
+      DBInstanceClass: db.t3.medium
       DBSubnetGroupName: !Ref MyDBSubnetGroup
       PubliclyAccessible: false
 
@@ -409,6 +417,6 @@ Outputs:
 
   VpcId:
     Description: The VPC Id
-    Value: !Ref VPC
+    Value: !Ref VpcBookstore
 
 
