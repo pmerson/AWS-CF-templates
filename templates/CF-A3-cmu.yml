@@ -27,22 +27,22 @@ Parameters:
     Default: 192.168.0.0/16
     Description: The CIDR range for the VPC. This should be a valid private (RFC 1918) CIDR range.
 
-  PublicSubnet01Block:
+  PublicSubnet1Block:
     Type: String
     Default: 192.168.0.0/18
     Description: CidrBlock for public subnet 01 within the VPC
 
-  PublicSubnet02Block:
+  PublicSubnet2Block:
     Type: String
     Default: 192.168.64.0/18
     Description: CidrBlock for public subnet 02 within the VPC
 
-  PrivateSubnet01Block:
+  DBSubnet1Block:
     Type: String
     Default: 192.168.128.0/18
     Description: CidrBlock for private subnet 01 within the VPC
 
-  PrivateSubnet02Block:
+  DBSubnet2Block:
     Type: String
     Default: 192.168.192.0/18
     Description: CidrBlock for private subnet 02 within the VPC
@@ -55,10 +55,10 @@ Metadata:
           default: "Worker Network Configuration"
         Parameters:
           - VpcBlock
-          - PublicSubnet01Block
-          - PublicSubnet02Block
-          - PrivateSubnet01Block
-          - PrivateSubnet02Block
+          - PublicSubnet1Block
+          - PublicSubnet2Block
+          - DBSubnet1Block
+          - DBSubnet2Block
 
 Resources:
 
@@ -96,89 +96,49 @@ Resources:
         - Key: Network
           Value: Public
 
-  PrivateRouteTable01:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref VpcBookstore
-      Tags:
-        - Key: Name
-          Value: Private Subnet AZ1
-        - Key: Network
-          Value: Private01
-
-  PrivateRouteTable02:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref VpcBookstore
-      Tags:
-        - Key: Name
-          Value: Private Subnet AZ2
-        - Key: Network
-          Value: Private02
-
   # The public route table routes directly to the Internet Gateway
   PublicRoute:
-    DependsOn: VPCGatewayAttachment
     Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
     Properties:
       RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
-  PrivateRoute01:
-    DependsOn:
-      - VPCGatewayAttachment
-      - NatGateway01
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable01
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGateway01
-
-  PrivateRoute02:
-    DependsOn:
-      - VPCGatewayAttachment
-      - NatGateway02
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable02
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGateway02
-
   NatGateway01:
-    DependsOn:
-      - NatGatewayEIP1
-      - PublicSubnet01
-      - VPCGatewayAttachment
     Type: AWS::EC2::NatGateway
+    DependsOn:
+      - NatGatewayElasticIP1
+      - PublicSubnet1
+      - VPCGatewayAttachment
     Properties:
-      AllocationId: !GetAtt 'NatGatewayEIP1.AllocationId'
-      SubnetId: !Ref PublicSubnet01
+      AllocationId: !GetAtt 'NatGatewayElasticIP1.AllocationId'
+      SubnetId: !Ref PublicSubnet1
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-NatGatewayAZ1'
 
   NatGateway02:
-    DependsOn:
-      - NatGatewayEIP2
-      - PublicSubnet02
-      - VPCGatewayAttachment
     Type: AWS::EC2::NatGateway
+    DependsOn:
+      - NatGatewayElasticIP2
+      - PublicSubnet2
+      - VPCGatewayAttachment
     Properties:
-      AllocationId: !GetAtt 'NatGatewayEIP2.AllocationId'
-      SubnetId: !Ref PublicSubnet02
+      AllocationId: !GetAtt 'NatGatewayElasticIP2.AllocationId'
+      SubnetId: !Ref PublicSubnet2
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-NatGatewayAZ2'
 
-  NatGatewayEIP1:
+  NatGatewayElasticIP1:
     DependsOn:
       - VPCGatewayAttachment
     Type: 'AWS::EC2::EIP'
     Properties:
       Domain: vpc
 
-  NatGatewayEIP2:
+  NatGatewayElasticIP2:
     DependsOn:
       - VPCGatewayAttachment
     Type: 'AWS::EC2::EIP'
@@ -187,7 +147,7 @@ Resources:
 
   # Public subnets for the K8S nodes
   # Each subnet is in a different availability zone (AZ)
-  PublicSubnet01:
+  PublicSubnet1:
     Type: AWS::EC2::Subnet
     Metadata:
       Comment: Subnet 01
@@ -199,16 +159,16 @@ Resources:
           - Fn::GetAZs:
               Ref: AWS::Region
       CidrBlock:
-        Ref: PublicSubnet01Block
+        Ref: PublicSubnet1Block
       VpcId:
         Ref: VpcBookstore
       Tags:
         - Key: Name
-          Value: !Sub "${AWS::StackName}-PublicSubnet01"
+          Value: !Sub "${AWS::StackName}-PublicSubnet1"
         - Key: kubernetes.io/role/elb
           Value: 1
 
-  PublicSubnet02:
+  PublicSubnet2:
     Type: AWS::EC2::Subnet
     Metadata:
       Comment: Subnet 02
@@ -220,16 +180,130 @@ Resources:
           - Fn::GetAZs:
               Ref: AWS::Region
       CidrBlock:
-        Ref: PublicSubnet02Block
+        Ref: PublicSubnet2Block
       VpcId:
         Ref: VpcBookstore
       Tags:
         - Key: Name
-          Value: !Sub "${AWS::StackName}-PublicSubnet02"
+          Value: !Sub "${AWS::StackName}-PublicSubnet2"
         - Key: kubernetes.io/role/elb
           Value: 1
 
-  PrivateSubnet01:
+  # Route table associated with subnets. Attaches a public subnets to a public route table.
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # Security group to be used for the EKS cluster. It is automatically applied to all nodes in the cluster.
+  ControlPlaneSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Cluster communication with worker nodes
+      VpcId: !Ref VpcBookstore
+
+
+  #
+  # EKS cluster
+  #
+  # The SubnetIds indicate the subnets where K8S control plane components (API server, scheduler, etc.) will be deployed.
+  EKSCluster:
+    Type: 'AWS::EKS::Cluster'
+    Properties:
+      Name: book-store-eks-cluster
+      RoleArn: !Ref LabRoleARN
+      ResourcesVpcConfig:
+        SecurityGroupIds:
+          - !Ref ControlPlaneSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnet1
+          - !Ref PublicSubnet2
+#          - !Ref DBSubnet1
+#          - !Ref DBSubnet2
+
+  # Node group with 1-5 nodes for the EKS cluster
+  # Suubnets indicate the subnets where K8S worker nodes will be deployed
+  MyNodeGroup:
+    Type: AWS::EKS::Nodegroup
+    Properties:
+      ClusterName: !Ref EKSCluster
+      NodeRole: !Ref LabRoleARN
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+#        - !Ref DBSubnet1
+#        - !Ref DBSubnet2
+      ScalingConfig:
+        DesiredSize: 4
+        MaxSize: 5
+        MinSize: 2
+      InstanceTypes:
+        - t2.micro
+
+
+  #
+  # Database configuration
+  #
+
+#  PrivateRouteTable01:
+#    Type: AWS::EC2::RouteTable
+#    Properties:
+#      VpcId: !Ref VpcBookstore
+#      Tags:
+#        - Key: Name
+#          Value: Private Subnet AZ1
+#        - Key: Network
+#          Value: Private01
+#  PrivateRouteTable02:
+#    Type: AWS::EC2::RouteTable
+#    Properties:
+#      VpcId: !Ref VpcBookstore
+#      Tags:
+#        - Key: Name
+#          Value: Private Subnet AZ2
+#        - Key: Network
+#          Value: Private02
+
+#  PrivateRoute01:
+#    DependsOn:
+#      - VPCGatewayAttachment
+#      - NatGateway01
+#    Type: AWS::EC2::Route
+#    Properties:
+#      RouteTableId: !Ref PrivateRouteTable01
+#      DestinationCidrBlock: 0.0.0.0/0
+#      NatGatewayId: !Ref NatGateway01
+#  PrivateRoute02:
+#    DependsOn:
+#      - VPCGatewayAttachment
+#      - NatGateway02
+#    Type: AWS::EC2::Route
+#    Properties:
+#      RouteTableId: !Ref PrivateRouteTable02
+#      DestinationCidrBlock: 0.0.0.0/0
+#      NatGatewayId: !Ref NatGateway02
+
+#  DBSubnet1RouteTableAssociation:
+#    Type: AWS::EC2::SubnetRouteTableAssociation
+#    Properties:
+#      SubnetId: !Ref DBSubnet1
+#      RouteTableId: !Ref PrivateRouteTable01
+#  DBSubnet2RouteTableAssociation:
+#    Type: AWS::EC2::SubnetRouteTableAssociation
+#    Properties:
+#      SubnetId: !Ref DBSubnet2
+#      RouteTableId: !Ref PrivateRouteTable02
+
+
+  # Private subnets for the RDS database instances
+  DBSubnet1:
     Type: AWS::EC2::Subnet
     Metadata:
       Comment: Subnet 03
@@ -240,16 +314,15 @@ Resources:
           - Fn::GetAZs:
               Ref: AWS::Region
       CidrBlock:
-        Ref: PrivateSubnet01Block
+        Ref: DBSubnet1Block
       VpcId:
         Ref: VpcBookstore
       Tags:
         - Key: Name
-          Value: !Sub "${AWS::StackName}-PrivateSubnet01"
+          Value: !Sub "${AWS::StackName}-DBSubnet1"
         - Key: kubernetes.io/role/internal-elb
           Value: 1
-
-  PrivateSubnet02:
+  DBSubnet2:
     Type: AWS::EC2::Subnet
     Metadata:
       Comment: Private Subnet 02
@@ -260,82 +333,14 @@ Resources:
           - Fn::GetAZs:
               Ref: AWS::Region
       CidrBlock:
-        Ref: PrivateSubnet02Block
+        Ref: DBSubnet2Block
       VpcId:
         Ref: VpcBookstore
       Tags:
         - Key: Name
-          Value: !Sub "${AWS::StackName}-PrivateSubnet02"
+          Value: !Sub "${AWS::StackName}-DBSubnet2"
         - Key: kubernetes.io/role/internal-elb
           Value: 1
-
-  # Route table associated with subnets. Attaches a public subnets to a public route table.
-  PublicSubnet01RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnet01
-      RouteTableId: !Ref PublicRouteTable
-
-  PublicSubnet02RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnet02
-      RouteTableId: !Ref PublicRouteTable
-
-  PrivateSubnet01RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PrivateSubnet01
-      RouteTableId: !Ref PrivateRouteTable01
-
-  PrivateSubnet02RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PrivateSubnet02
-      RouteTableId: !Ref PrivateRouteTable02
-
-  # Security group to be used for the EKS cluster. It is automatically applied to all nodes in the cluster.
-  ControlPlaneSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Cluster communication with worker nodes
-      VpcId: !Ref VpcBookstore
-
-
-  ##
-  ## EKS cluster
-  ##
-  EKSCluster:
-    Type: 'AWS::EKS::Cluster'
-    Properties:
-      Name: book-store-eks-cluster
-      RoleArn: !Ref LabRoleARN
-      ResourcesVpcConfig:
-        SecurityGroupIds:
-          - !Ref ControlPlaneSecurityGroup
-        SubnetIds:
-          - !Ref PublicSubnet01
-          - !Ref PublicSubnet02
-          - !Ref PrivateSubnet01
-          - !Ref PrivateSubnet02
-
-  ## Node group with 1-5 nodes for the EKS cluster
-  MyNodeGroup:
-    Type: AWS::EKS::Nodegroup
-    Properties:
-      ClusterName: !Ref EKSCluster
-      NodeRole: !Ref LabRoleARN
-      Subnets:
-        - !Ref PublicSubnet01
-        - !Ref PublicSubnet02
-        - !Ref PrivateSubnet01
-        - !Ref PrivateSubnet02
-      ScalingConfig:
-        DesiredSize: 4
-        MaxSize: 5
-        MinSize: 2
-      InstanceTypes:
-        - t2.micro
 
 
   # DB Subnet group
@@ -346,8 +351,8 @@ Resources:
       DBSubnetGroupName: my-dbsubnet-group
       DBSubnetGroupDescription: My subnet group for RDS
       SubnetIds:
-        - !Ref PrivateSubnet01
-        - !Ref PrivateSubnet02
+        - !Ref DBSubnet1
+        - !Ref DBSubnet2
 
   # DB Security group
   # Port 3306 is the default TCP port used by MySQL databases.
@@ -409,7 +414,7 @@ Outputs:
 
   SubnetIds:
     Description: Subnets IDs in the VPC
-    Value: !Join [ ",", [ !Ref PublicSubnet01, !Ref PublicSubnet02, !Ref PrivateSubnet01, !Ref PrivateSubnet02 ] ]
+    Value: !Join [ ",", [ !Ref PublicSubnet1, !Ref PublicSubnet2, !Ref DBSubnet1, !Ref DBSubnet2 ] ]
 
   SecurityGroups:
     Description: Security group for the cluster control plane communication with worker nodes

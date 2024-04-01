@@ -24,7 +24,8 @@ Example of application design that could be deployed to this infrastructure.
 
 ## Multiple EC2 instances, routing based on HTTP header, BFFs, and RDS cluster
 
-The [CF template](/templates/CF-A2-cmu.yml). (The routing rules might be incomplete, but you can easily fix them.)
+The [CF template](/templates/CF-A2-cmu.yml). (The routing rules are incomplete on purpose. 
+It's a challenge to you to fix them based on the application design further below.)
 
 AWS deployment diagram (using [AWS notation](https://aws.amazon.com/architecture/icons/)).
 
@@ -51,7 +52,8 @@ The [CF template](/templates/CF-A3-cmu.yml).
 
 AWS deployment diagram (using [AWS notation](https://aws.amazon.com/architecture/icons/)).
 
-TO-DO
+![AWS deployment diagram](/images/a3-deployment-view.jpg)
+
 
 Example of application design that could be deployed to this infrastructure.
 
