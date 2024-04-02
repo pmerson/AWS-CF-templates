@@ -5,6 +5,10 @@ Parameters:
     Type: String
     Description: "Enter the ARN for LabRole you find here: IAM | Roles | click on LabRole | copy ARN"
 
+  AccountID:
+    Type: String
+    Description: "Enter the Account ID you find by clicking the user on the top right of the AWS console"
+
   # Database credentials
   DBUsername:
     Description: Username for database access
@@ -214,26 +218,53 @@ Resources:
   # EKS cluster
   #
   # The SubnetIds indicate the subnets where K8S control plane components (API server, scheduler, etc.) will be deployed.
-  EKSCluster:
+  # The Logging property enables CloudWatch logging for these types of calls: api (calls to the API server),
+  # audit (actions performed by users), and authenticator.
+  #
+  BookstoreEKSCluster:
     Type: 'AWS::EKS::Cluster'
     Properties:
-      Name: book-store-eks-cluster
+      Name: BookstoreEKSCluster
       RoleArn: !Ref LabRoleARN
       ResourcesVpcConfig:
+        EndpointPrivateAccess: true
+        EndpointPublicAccess: true
         SecurityGroupIds:
           - !Ref ControlPlaneSecurityGroup
         SubnetIds:
           - !Ref PublicSubnet1
           - !Ref PublicSubnet2
-#          - !Ref DBSubnet1
-#          - !Ref DBSubnet2
+      Logging:
+        ClusterLogging:
+          EnabledTypes:
+            - Type: api
+            - Type: audit
+            - Type: authenticator
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIG_MAP
+
+  # The console/shell user needs to be granted EKS cluster access with policy AmazonEKSClusterAdminPolicy.
+
+  # The access entry for the EKS cluster allows the LL console user to manage and deploy things to K8S.
+#  EKSAccessToUser:
+#    Type: AWS::EKS::AccessEntry
+#    Properties:
+#      ClusterName: !Ref BookstoreEKSCluster
+#      PrincipalArn: arn:aws:iam::${AccountID}:role/voclabs
+#      Type: 'STANDARD'
+#      AccessPolicies:
+#        - PolicyArn: 'arn:aws:iam::aws:policy/AmazonEKSClusterPolicy'
+#          AccessScope:
+#            Type: 'cluster'
+#        - AmazonEKSClusterAdminPolicy
+
 
   # Node group with 1-5 nodes for the EKS cluster
   # Suubnets indicate the subnets where K8S worker nodes will be deployed
   MyNodeGroup:
     Type: AWS::EKS::Nodegroup
     Properties:
-      ClusterName: !Ref EKSCluster
+      ClusterName: !Ref BookstoreEKSCluster
       NodeRole: !Ref LabRoleARN
       Subnets:
         - !Ref PublicSubnet1
@@ -348,7 +379,7 @@ Resources:
   MyDBSubnetGroup:
     Type: 'AWS::RDS::DBSubnetGroup'
     Properties:
-      DBSubnetGroupName: my-dbsubnet-group
+      DBSubnetGroupName: MyDBSubnetGroup
       DBSubnetGroupDescription: My subnet group for RDS
       SubnetIds:
         - !Ref DBSubnet1
