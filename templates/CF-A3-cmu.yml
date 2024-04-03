@@ -222,9 +222,9 @@ Resources:
   # audit (actions performed by users), and authenticator.
   #
   BookstoreEKSCluster:
-    Type: 'AWS::EKS::Cluster'
+    Type: AWS::EKS::Cluster
     Properties:
-      Name: BookstoreEKSCluster
+      Name: !Sub "BookstoreEKSCluster-${AWS::StackName}"
       RoleArn: !Ref LabRoleARN
       ResourcesVpcConfig:
         EndpointPrivateAccess: true
@@ -251,11 +251,12 @@ Resources:
 #    Properties:
 #      ClusterName: !Ref BookstoreEKSCluster
 #      PrincipalArn: arn:aws:iam::${AccountID}:role/voclabs
-#      Type: 'STANDARD'
+#      Type: STANDARD
 #      AccessPolicies:
-#        - PolicyArn: 'arn:aws:iam::aws:policy/AmazonEKSClusterPolicy'
+#        - PolicyArn: arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
 #          AccessScope:
-#            Type: 'cluster'
+#            Type: cluster
+#        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
 #        - AmazonEKSClusterAdminPolicy
 
 
