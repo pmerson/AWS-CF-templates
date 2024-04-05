@@ -243,6 +243,13 @@ Resources:
       AccessConfig:
         AuthenticationMode: API_AND_CONFIG_MAP
 
+  # Install the Amazon CloudWatch Observability EKS add-on (our goal is to see application logs)
+  CloudObservabilityAddon:
+    Type: AWS::EKS::Addon
+    Properties:
+      ClusterName: !Ref BookstoreEKSCluster
+      AddonName: amazon-cloudwatch-observability
+
   # The console/shell user needs to be granted EKS cluster access with policy AmazonEKSClusterAdminPolicy.
   # The commented out resource below was supposed to grant that permission, but it didn't work. As it stands, you
   #  should add the access manually on the AWS console. (But you're welcome to try to make the AccessEntry below work.)
@@ -274,11 +281,11 @@ Resources:
 #        - !Ref DBSubnet1
 #        - !Ref DBSubnet2
       ScalingConfig:
-        DesiredSize: 4
-        MaxSize: 5
+        DesiredSize: 6
+        MaxSize: 8
         MinSize: 2
       InstanceTypes:
-        - t2.micro
+        - t2.large
 
 
   #
