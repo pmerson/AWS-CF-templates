@@ -329,8 +329,9 @@ Resources:
   WebBFFTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      HealthCheckIntervalSeconds: 30
       HealthCheckProtocol: HTTP
+      HealthCheckPath: "/status"
+      HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 15
       HealthyThresholdCount: 5
       Matcher:
@@ -354,8 +355,9 @@ Resources:
   MobileBFFTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      HealthCheckIntervalSeconds: 30
       HealthCheckProtocol: HTTP
+      HealthCheckPath: "/status"
+      HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 15
       HealthyThresholdCount: 5
       Matcher:
@@ -379,8 +381,9 @@ Resources:
   CustomerServiceTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      HealthCheckIntervalSeconds: 30
       HealthCheckProtocol: HTTP
+      HealthCheckPath: "/status"
+      HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 15
       HealthyThresholdCount: 5
       Matcher:
@@ -400,12 +403,13 @@ Resources:
       VpcId: !Ref VpcBookstore
 
   # Target group for the backend BOOK service.
-  # Instances EC2BookstoreA and EC2BookstoreD from two AZs.
+  # Instances EC2BookstoreB and EC2BookstoreC from two AZs.
   BookServiceTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      HealthCheckIntervalSeconds: 30
       HealthCheckProtocol: HTTP
+      HealthCheckPath: "/status"
+      HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 15
       HealthyThresholdCount: 5
       Matcher:

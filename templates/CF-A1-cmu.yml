@@ -260,8 +260,9 @@ Resources:
   EC2TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      HealthCheckIntervalSeconds: 30
       HealthCheckProtocol: HTTP
+      HealthCheckPath: "/status"
+      HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 15
       HealthyThresholdCount: 5
       Matcher:
