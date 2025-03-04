@@ -2,7 +2,12 @@
 
 Parameters:
 
-  #ssh to the EC2 instance
+  VpcName:
+    Description: 'Give a short name for your VPC. It will be used as a prefix in the name of other resources.'
+    Type: String
+    NoEcho: false
+    Default: bookstore-dev
+
   SSHLocation:
     Description: The IP address range that can be used to SSH to the EC2 instances
     Type: String
@@ -11,7 +16,7 @@ Parameters:
     Default: 0.0.0.0/0
     AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
     ConstraintDescription: Must be a valid IP CIDR range of the form x.x.x.x/x
-  # Database credentials
+
   DBUsername:
     Description: Username for database access
     Type: String
@@ -19,6 +24,7 @@ Parameters:
     MaxLength: '16'
     AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
     ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
+
   DBPassword:
     NoEcho: 'true'
     Description: Password for database access
@@ -26,34 +32,26 @@ Parameters:
     MinLength: '8'
     MaxLength: '41'
     AllowedPattern: '[a-zA-Z0-9]*'
-  #launch template data
-  LatestAmiId:
-    Description: Region specific image from the Parameter Store
-    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
-    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
-  InstanceType:
-    Description: Amazon EC2 instance type for the instances
-    Type: String
-    AllowedValues:
-      - t3.micro
-      - t3.small
-      - t3.medium
-    Default: t3.micro
+
 
 Resources:
 
   # VPC
   # It's a virtual private network where within you launch resources you'll manage.
   # There are 1+ subnets defined in a VPC. Each subnet is a range of IP addresses and is limited to a single AZ.
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-vpc.html
   VpcBookstore:
-    Type: 'AWS::EC2::VPC'
+    Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 10.0.0.0/16
       EnableDnsSupport: 'true'
       EnableDnsHostnames: 'true'
+      Tags:
+        - Key: Name
+          Value: !Sub '${VpcName}-${AWS::StackName}'
 
-  # Public subnets for EC2 instances
-  # Each subnet is in a different availability zone (AZ)
+  # Public subnets for EC2 instances. Each subnet is in a different availability zone (AZ).
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-subnet.html
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -63,8 +61,7 @@ Resources:
       CidrBlock: 10.0.0.0/24
       Tags:
         - Key: Name
-          Value: PublicSubnet1
-
+          Value: !Sub "${VpcName}-PublicSubnet1"
   PublicSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
@@ -74,36 +71,81 @@ Resources:
       CidrBlock: 10.0.20.0/24
       Tags:
         - Key: Name
-          Value: PublicSubnet2
+          Value: !Sub "${VpcName}-PublicSubnet2"
+
+  # Private subnets for the RDS database instances
+  # They become elements of a DBSubnetGroup that is used in the DB configuration.
+  DBSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VpcBookstore
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs "" ]
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-DBSubnet1"
+  DBSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VpcBookstore
+      CidrBlock: 10.0.5.0/24
+      AvailabilityZone: !Select [ 1, !GetAZs "" ]
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-DBSubnet2"
+
+  # DB Subnet group
+  # It defines the subnets where RDS DB instances will reside. Each subnet should be in a separate AZ.
+  # DB instances will run in the subnets specified by this DBSubnetGroup. We select subnets from different AZs for high availability.
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-rds-dbsubnetgroup.html
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub "${VpcName}-DBSubnetGroup"
+      DBSubnetGroupDescription: Multi-AZ subnet group for RDS instances
+      SubnetIds:
+        - Ref: DBSubnet1
+        - Ref: DBSubnet2
 
   # Internet gateway
   # It enables the communication between the VPC and the public Internet. It provides routing and NAT services.
+  # A public subnet needs an Internet Gateway. Between IPs in a subnet and an Internet gateway we need route tables.
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-internetgateway.html
   InternetGateway:
-    Type: "AWS::EC2::InternetGateway"
+    Type: AWS::EC2::InternetGateway
     DependsOn: VpcBookstore
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-IGW"
   VPCGatewayAttachment:
     Type: "AWS::EC2::VPCGatewayAttachment"
     Properties:
       VpcId: !Ref VpcBookstore
       InternetGatewayId: !Ref "InternetGateway"
 
-  # Route tables
+  # Route tables + routes + subnet-route associations.
+  # The route we need is: PublicSubnet12 --> PUBLIC ROUTE --> Internet Gateway
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-route.html
+
+  # PUBLIC ROUTE
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VpcBookstore
       Tags:
         - Key: Name
-          Value: Public
+          Value: !Sub "${VpcName}-PublicRouteTable"
   # The public route table routes directly to the Internet Gateway
-  PublicRoute1:
+  PublicRoute:
     Type: AWS::EC2::Route
     DependsOn: VPCGatewayAttachment
     Properties:
       RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
-
   # Route table associated with subnets. Attaches the public subnets to the public route table.
   PublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -116,97 +158,267 @@ Resources:
       SubnetId: !Ref PublicSubnet2
       RouteTableId: !Ref PublicRouteTable
 
-  # EC2 Security Group
+  # SECURITY GROUPS
   # A security group defines what inbound and outbound traffic is allowed.
   # Allowed traffic is specified in terms of protocols, ports and IP ranges.
-  EC2SecurityGroup:
-    DependsOn: VpcBookstore
-    Type: 'AWS::EC2::SecurityGroup'
-    Properties:
-      GroupName: EC2SecurityGroup
-      GroupDescription: Security group for EC2 instances allowing http and ssh
-      VpcId: !Ref VpcBookstore
-      SecurityGroupEgress:
-        - Description: Allow all outbound traffic
-          IpProtocol: "-1"  # ALL
-          CidrIp: 0.0.0.0/0
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          SourceSecurityGroupId:
-            Ref: ExternalALBSecurityGroup
-        - IpProtocol: tcp  # ssh configured to your IP
-          FromPort: 22
-          ToPort: 22
-          CidrIp: !Ref SSHLocation
-        - IpProtocol: tcp
-          FromPort: 3000
-          ToPort: 3000
-          SourceSecurityGroupId:
-            Ref: InternalALBSecurityGroup
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-securitygroup.html
 
-  # Application Load Balancers (ALB)
-  # It's a layer 7 (application layer) load balancer. Ideal for HTTP/HTTPS traffic and microservices architectures.
-
+  # Security Group for the Application Load Balancer (ALB)
   ExternalALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: ExternalALBSecurityGroup
-      GroupDescription: ALB Security Group allowing 80 from anywhere
+      GroupName: !Sub "${VpcName}-ExternalALBSecurityGroup"
+      GroupDescription: SG allowing HTTP(S) from anywhere
       VpcId: !Ref VpcBookstore
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-ExternalALBSecurityGroup"
+      SecurityGroupIngress:
+        - Description: HTTP open to the world
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: HTTPS open to the world
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"
           CidrIp: 0.0.0.0/0
+
+  # EC2 Security Group
+  EC2SecurityGroup:
+    DependsOn: ExternalALBSecurityGroup
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${VpcName}-EC2SecurityGroup"
+      GroupDescription: Security group for EC2 instances allowing http and ssh
+      VpcId: !Ref VpcBookstore
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-EC2SecurityGroup"
       SecurityGroupIngress:
-        - IpProtocol: tcp   # HTTP 80 open to world
+        - Description: Allow inbound SSH traffic from IPs specified when creating the stack
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
+        - Description: Allow HTTP traffic from the ALB
+          IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp   # HTTPS 443 open to world
-          FromPort: 443
-          ToPort: 443
+          SourceSecurityGroupId:
+            Fn::GetAtt:
+              - ExternalALBSecurityGroup
+              - GroupId
+      SecurityGroupEgress:
+        - Description: Allow all outbound traffic
+          IpProtocol: "-1"  # ALL
           CidrIp: 0.0.0.0/0
 
-  # The ALB for Internet facing traffic
+  # DB Security group
+  # Port 3306 is the default TCP port used by MySQL databases.
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: EC2SecurityGroup
+    Properties:
+      GroupName: !Sub "${VpcName}-DBSecurityGroup"
+      GroupDescription: Open database for access from EC2 instances
+      VpcId: !Ref VpcBookstore
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-DBSecurityGroup"
+      SecurityGroupIngress:
+        - Description: Port 3306 open to the EC2 instances.
+          IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId:
+            Ref: EC2SecurityGroup
+      SecurityGroupEgress:
+        - Description: Allow all outbound traffic
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  # BFFs call backend services through the internal ALB using HTTP on port 3000. The SG defines these calls must come from within the VPC.
+  InternalALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${VpcName}-InternalALBSecurityGroup"
+      GroupDescription: SG allowing port 3000 from within the VPC
+      VpcId: !Ref VpcBookstore
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-InternalALBSecurityGroup"
+      SecurityGroupIngress:
+        - Description: Allow BFFs to make HTTP calls to backend services on port 3000
+          IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: !GetAtt VpcBookstore.CidrBlock
+      SecurityGroupEgress:
+        - Description: Allow all outbound traffic
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+
+  # EC2 Instances
+  # An EC2 instance launched in a VPC has a private IPv4 address and may have a public IP address (Elastic IP).
+  # Upon initialization the EC2 instance installs and runs docker. On your own template, you may add the
+  # instructions to pull and run your service docker images.
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-instance.html
+  EC2BookstoreA:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-053a45fff0a704a47
+      InstanceType: t3.micro
+      KeyName: vockey
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Update package manager (sudo not needed in UserData for EC2 creation)
+          yum update -y
+
+          # Install and start docker
+          yum install -y docker
+          service docker start
+          # Add ec2 user to docker group
+          usermod -a -G docker ec2-user
+          # Enable docker to start automatically
+          systemctl enable docker
+
+      SubnetId: !Ref PublicSubnet1
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-EC2BookstoreA"
+  ElasticIPA:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref EC2BookstoreA
+
+  EC2BookstoreB:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-053a45fff0a704a47
+      InstanceType: t3.micro
+      KeyName: vockey
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Update package manager (sudo not needed in UserData for EC2 creation)
+          yum update -y
+
+          # Install and start docker
+          yum install -y docker
+          service docker start
+          # Add ec2 user to docker group
+          usermod -a -G docker ec2-user
+          # Enable docker to start automatically
+          systemctl enable docker
+
+      SubnetId: !Ref PublicSubnet2
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-EC2BookstoreB"
+  ElasticIPB:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref EC2BookstoreB
+
+  EC2BookstoreC:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-053a45fff0a704a47
+      InstanceType: t3.micro
+      KeyName: vockey
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Update package manager (sudo not needed in UserData for EC2 creation)
+          yum update -y
+
+          # Install and start docker
+          yum install -y docker
+          service docker start
+          # Add ec2 user to docker group
+          usermod -a -G docker ec2-user
+          # Enable docker to start automatically
+          systemctl enable docker
+
+      SubnetId: !Ref PublicSubnet1
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-EC2BookstoreC"
+  ElasticIPC:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref EC2BookstoreC
+
+  EC2BookstoreD:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-053a45fff0a704a47
+      InstanceType: t3.micro
+      KeyName: vockey
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Update package manager (sudo not needed in UserData for EC2 creation)
+          yum update -y
+
+          # Install and start docker
+          yum install -y docker
+          service docker start
+          # Add ec2 user to docker group
+          usermod -a -G docker ec2-user
+          # Enable docker to start automatically
+          systemctl enable docker
+
+      SubnetId: !Ref PublicSubnet2
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-EC2BookstoreD"
+  ElasticIPD:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref EC2BookstoreD
+
+
+  # Application Load Balancers (ALB)
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticloadbalancingv2-loadbalancer.html
+
+  # The ALB for Internet facing traffic (EXTERNAL)
   ExternalALB:
     DependsOn: VPCGatewayAttachment
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: ExternalALB
-      Scheme: internet-facing
+      Name: !Sub "${VpcName}-ExternalALB"
       Type: application
+      Scheme: internet-facing
       Subnets:
         - !Ref PublicSubnet1
         - !Ref PublicSubnet2
       SecurityGroups:
         - !Ref ExternalALBSecurityGroup
 
-  InternalALBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupName: InternalALBSecurityGroup
-      GroupDescription: ALB Security Group allowing port 3000 from within
-      VpcId: !Ref VpcBookstore
-      SecurityGroupEgress:
-        - Description: Allow all outbound traffic
-          IpProtocol: "-1"
-          CidrIp: 0.0.0.0/0
-      SecurityGroupIngress:
-        - IpProtocol: tcp  # HTTP 3000 from within
-          FromPort: 3000
-          ToPort: 3000
-          CidrIp: !GetAtt VpcBookstore.CidrBlock
-
-  # The ALB for Internet facing traffic
+  # The ALB for BFF to service traffic (INTERNAL)
   InternalALB:
-    DependsOn: VPCGatewayAttachment
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: InternalALB
-      Scheme: internal
+      Name: !Sub "${VpcName}-InternalALB"
       Type: application
+      Scheme: internal
       Subnets:
         - !Ref PublicSubnet1
         - !Ref PublicSubnet2
@@ -214,239 +426,16 @@ Resources:
         - !Ref InternalALBSecurityGroup
 
 
-  # EC2 Instances
-  EC2BookstoreA:
-    Type: 'AWS::EC2::Instance'
-    Properties:
-      ImageId: ami-0d5eff06f840b45e9
-      InstanceType: t2.micro
-      KeyName: vockey
-      UserData:
-        Fn::Base64:
-          !Sub |
-          #!/bin/bash
-          sudo -i
-          sudo yum update -y
-          amazon-linux-extras install docker
-          service docker start
-          usermod -a -G docker ec2-user
-          chkconfig docker on
-      SubnetId: !Ref PublicSubnet1
-      SecurityGroupIds:
-        - !Ref EC2SecurityGroup
-      Tags:
-        - Key: Name
-          Value: EC2BookstoreA
-  ElasticIPA:
-    Type: AWS::EC2::EIP
-    Properties:
-      InstanceId: !Ref EC2BookstoreA
-
-  EC2BookstoreB:
-    Type: 'AWS::EC2::Instance'
-    Properties:
-      ImageId: ami-0d5eff06f840b45e9
-      InstanceType: t2.micro
-      KeyName: vockey
-      UserData:
-        Fn::Base64:
-          !Sub |
-          #!/bin/bash
-          sudo -i
-          sudo yum update -y
-          amazon-linux-extras install docker
-          service docker start
-          usermod -a -G docker ec2-user
-          chkconfig docker on
-      SubnetId: !Ref PublicSubnet2
-      SecurityGroupIds:
-        - !Ref EC2SecurityGroup
-      Tags:
-        - Key: Name
-          Value: EC2BookstoreB
-  ElasticIPB:
-    Type: AWS::EC2::EIP
-    Properties:
-      InstanceId: !Ref EC2BookstoreB
-
-  EC2BookstoreC:
-    Type: 'AWS::EC2::Instance'
-    Properties:
-      ImageId: ami-0d5eff06f840b45e9
-      InstanceType: t2.micro
-      KeyName: vockey
-      UserData:
-        Fn::Base64:
-          !Sub |
-          #!/bin/bash
-          sudo -i
-          sudo yum update -y
-          amazon-linux-extras install docker
-          service docker start
-          usermod -a -G docker ec2-user
-          chkconfig docker on
-      SubnetId: !Ref PublicSubnet1
-      SecurityGroupIds:
-        - !Ref EC2SecurityGroup
-      Tags:
-        - Key: Name
-          Value: EC2BookstoreC
-  ElasticIPC:
-    Type: AWS::EC2::EIP
-    Properties:
-      InstanceId: !Ref EC2BookstoreC
-
-  EC2BookstoreD:
-    Type: 'AWS::EC2::Instance'
-    Properties:
-      ImageId: ami-0d5eff06f840b45e9
-      InstanceType: t2.micro
-      KeyName: vockey
-      UserData:
-        Fn::Base64:
-          !Sub |
-          #!/bin/bash
-          sudo -i
-          sudo yum update -y
-          amazon-linux-extras install docker
-          service docker start
-          usermod -a -G docker ec2-user
-          chkconfig docker on
-      SubnetId: !Ref PublicSubnet2
-      SecurityGroupIds:
-        - !Ref EC2SecurityGroup
-      Tags:
-        - Key: Name
-          Value: EC2BookstoreD
-  ElasticIPD:
-    Type: AWS::EC2::EIP
-    Properties:
-      InstanceId: !Ref EC2BookstoreD
-
-
-  # Target group for the Web App BFF
-  # Instances EC2BookstoreA and EC2BookstoreB from two AZs.
-  WebBFFTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      HealthCheckProtocol: HTTP
-      HealthCheckPath: "/status"
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 15
-      HealthyThresholdCount: 5
-      Matcher:
-        HttpCode: '200'
-      Name: WebBFFTargetGroup
-      Port: 80
-      Protocol: HTTP
-      TargetGroupAttributes:
-        - Key: deregistration_delay.timeout_seconds
-          Value: '30'
-      Targets:
-        - Id: !Ref EC2BookstoreA
-          Port: 80
-        - Id: !Ref EC2BookstoreB
-          Port: 80
-      UnhealthyThresholdCount: 3
-      VpcId: !Ref VpcBookstore
-
-  # Target group for the Web App BFF
-  # Instances EC2BookstoreC and EC2BookstoreD from two AZs.
-  MobileBFFTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      HealthCheckProtocol: HTTP
-      HealthCheckPath: "/status"
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 15
-      HealthyThresholdCount: 5
-      Matcher:
-        HttpCode: '200'
-      Name: MobileBFFTargetGroup
-      Port: 80
-      Protocol: HTTP
-      TargetGroupAttributes:
-        - Key: deregistration_delay.timeout_seconds
-          Value: '30'
-      Targets:
-        - Id: !Ref EC2BookstoreC
-          Port: 80
-        - Id: !Ref EC2BookstoreD
-          Port: 80
-      UnhealthyThresholdCount: 3
-      VpcId: !Ref VpcBookstore
-
-  # Target group for the backend CUSTOMER service.
-  # Instances EC2BookstoreA and EC2BookstoreD from two AZs.
-  CustomerServiceTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      HealthCheckProtocol: HTTP
-      HealthCheckPath: "/status"
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 15
-      HealthyThresholdCount: 5
-      Matcher:
-        HttpCode: '200'
-      Name: CustomerServiceTargetGroup
-      Port: 3000
-      Protocol: HTTP
-      TargetGroupAttributes:
-        - Key: deregistration_delay.timeout_seconds
-          Value: '30'
-      Targets:
-        - Id: !Ref EC2BookstoreA
-          Port: 3000
-        - Id: !Ref EC2BookstoreD
-          Port: 3000
-      UnhealthyThresholdCount: 3
-      VpcId: !Ref VpcBookstore
-
-  # Target group for the backend BOOK service.
-  # Instances EC2BookstoreB and EC2BookstoreC from two AZs.
-  BookServiceTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      HealthCheckProtocol: HTTP
-      HealthCheckPath: "/status"
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 15
-      HealthyThresholdCount: 5
-      Matcher:
-        HttpCode: '200'
-      Name: BookServiceTargetGroup
-      Port: 3000
-      Protocol: HTTP
-      TargetGroupAttributes:
-        - Key: deregistration_delay.timeout_seconds
-          Value: '30'
-      Targets:
-        - Id: !Ref EC2BookstoreB
-          Port: 3000
-        - Id: !Ref EC2BookstoreC
-          Port: 3000
-      UnhealthyThresholdCount: 3
-      VpcId: !Ref VpcBookstore
-
-  # ListenerRule that defines the routing condition for Web app clients.
-  WebClientListenerRule:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      Actions:
-        - Type: forward
-          TargetGroupArn: !Ref WebBFFTargetGroup
-      Conditions:
-        - Field: http-header
-          HttpHeaderConfig:
-            HttpHeaderName: X-Client-Type
-            Values:
-              - Web
-      ListenerArn: !Ref HTTPListener
-      Priority: 1
-
-  # Listener for port 80
+  # Listener
+  # Defines the protocol/port combination that an ALB listens on for incoming requests.
+  # It checks for connection requests from clients using the configured protocol and port.
+  # Based on the rules you define, it forwards requests to one or more target groups.
   # DefaultActions are executed if no listener rule matches the incoming request.
-  HTTPListener:
+  # Each ALB requires at least one listener to accept traffic.
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticloadbalancingv2-listener.html
+
+  # Listener for the External ALB
+  ExternalHTTPListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       LoadBalancerArn: !Ref ExternalALB
@@ -459,50 +448,8 @@ Resources:
             ContentType: text/plain
             MessageBody: "Request missing X-Client-Type header"
 
-  # ListenerRule that defines the routing condition for calling the CUSTOMER Service.
-  # Change the path-pattern value as necessary (ex.: /api/customers/*)
-  CustomerServiceListenerRule:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      Actions:
-        - Type: forward
-          TargetGroupArn: !Ref CustomerServiceTargetGroup
-      Conditions:
-        - Field: path-pattern
-          Values:
-            - /customers*
-        - Field: source-ip
-          SourceIpConfig:
-            Values:
-              - Fn::GetAtt:
-                  - VpcBookstore
-                  - CidrBlock
-      ListenerArn: !Ref BackendServiceListener
-      Priority: 2
-
-  # ListenerRule that defines the routing condition for calling the BOOK Service.
-  # Change the path-pattern value as necessary (ex.: /api/books/*)
-  BookServiceListenerRule:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      Actions:
-        - Type: forward
-          TargetGroupArn: !Ref BookServiceTargetGroup
-      Conditions:
-        - Field: path-pattern
-          Values:
-            - /books*
-        - Field: source-ip
-          SourceIpConfig:
-            Values:
-              - Fn::GetAtt:
-                  - VpcBookstore
-                  - CidrBlock
-      ListenerArn: !Ref BackendServiceListener
-      Priority: 3
-
   # Listener for the backend services (Customer and Book) called only from within the VPC.
-  BackendServiceListener:
+  InternalHTTPListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       LoadBalancerArn: !Ref InternalALB
@@ -515,175 +462,236 @@ Resources:
             ContentType: text/plain
             MessageBody: "Nah, I don't have anything at that location."
 
+  # Listener rules
+  # Complements the listener definition by specifying a condition and an action.
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticloadbalancingv2-listenerrule.html
 
-  #################################
-  # This CF template defines above 4 EC2 instances in two AZs with an ALB. Such setup provides HIGH AVAILABILITY as
-  # traffic can be directed to a single instance in case there's a problem with the other instance or AZ.
-  # However, this setup does NOT provide HIGH SCALABILITY. The scalable alternative would be to define an
-  # Auto Scaling Group (ASG). ASGs dynamically adjust the number of instances based on demand. If traffic increases,
-  # it launches more instances; if demand decreases, it terminates instances.
-  # ASGs require a launch template (or launch configuration), which describes the configuration for the EC2 instances.
-  # The snippet below defines a LaunchTemplate and an ASG. However, the ASG is not a target of the ALB, so it's not
-  # used.
-  #
-  # If you have time, feel free to alter your CF template to use the ASG instead of the two EC2 instances. YOu'll
-  # have to add the ASG as a target of the ALB.
-
-  # Launch template
-  #  MyLaunchTemplate:
-  #    Type: 'AWS::EC2::LaunchTemplate'
-  #    Properties:
-  #      LaunchTemplateName: !Sub '${AWS::StackName}-launch-template-for-auto-scaling'
-  #      LaunchTemplateData:
-  #        UserData:
-  #          Fn::Base64:
-  #            !Sub |
-  #            #!/bin/bash
-  #            sudo -i
-  #            sudo yum update -y
-  #            amazon-linux-extras install docker
-  #            service docker start
-  #            usermod -a -G docker ec2-user
-  #            chkconfig docker on
-  #            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
-  #            . ~/.nvm/nvm.sh
-  #            nvm install 16
-  #        NetworkInterfaces:
-  #          - DeviceIndex: 0
-  #            AssociatePublicIpAddress: true
-  #            Groups:
-  #              - !Ref EC2SecurityGroup
-  #            DeleteOnTermination: true
-  #        Placement:
-  #          Tenancy: default
-  #        ImageId: !Ref LatestAmiId
-  #        InstanceType: !Ref InstanceType
-  #        KeyName: vockey
-  #
-  #  # The ASG itself
-  #  MyASG:
-  #    Type: AWS::AutoScaling::AutoScalingGroup
-  #    Properties:
-  #      LaunchTemplate:
-  #        LaunchTemplateId: !Ref MyLaunchTemplate
-  #        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
-  #      MaxSize: '4'
-  #      MinSize: '2'
-  #      DesiredCapacity: '2'
-  #      VPCZoneIdentifier:
-  #        - !Ref PublicSubnet1
-  #        - !Ref PublicSubnet2
-
-  # End of ASG definition
-  #################################
-
-  #
-  # Database configuration
-  #
-
-  # Private subnets for the RDS database instances
-  DBSubnet1:
-    Type: 'AWS::EC2::Subnet'
+  # ListenerRule that defines the routing condition for Web app clients.
+  WebClientListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
-      VpcId:
-        Ref: VpcBookstore
-      CidrBlock: 10.0.3.0/24
-      AvailabilityZone: !Select [ 0, !GetAZs "" ]
-      Tags:
-        - Key: name
-          Value: DBSubnet1
-  DBSubnet2:
-    Type: 'AWS::EC2::Subnet'
-    Properties:
-      VpcId:
-        Ref: VpcBookstore
-      CidrBlock: 10.0.5.0/24
-      AvailabilityZone: !Select [ 1, !GetAZs "" ]
-      Tags:
-        - Key: name
-          Value: DBSubnet2
+      Conditions:
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName: X-Client-Type
+            Values:
+              - Web
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref WebBFFTargetGroup
+      ListenerArn: !Ref ExternalHTTPListener
+      Priority: 1
 
-  #  PrivateRouteTable:
-  #    Type: "AWS::EC2::RouteTable"
-  #    Properties:
-  #      VpcId: !Ref VpcBookstore
-  #
-  #  PrivateSubnet1RouteTableAssociation:
-  #    Type: "AWS::EC2::SubnetRouteTableAssociation"
-  #    Properties:
-  #      SubnetId: !Ref DBSubnet1
-  #      RouteTableId: !Ref PrivateRouteTable
-  #  PrivateSubnet2RouteTableAssociation:
-  #    Type: "AWS::EC2::SubnetRouteTableAssociation"
-  #    Properties:
-  #      SubnetId: !Ref DBSubnet2
-  #      RouteTableId: !Ref PrivateRouteTable
-
-  # DB Subnet group
-  # It defines the subnets where RDS DB instances will reside. Each subnet should be in a separate AZ.
-  MyDBSubnetGroup:
-    Type: "AWS::RDS::DBSubnetGroup"
+  # ListenerRule that defines the routing condition for calling the CUSTOMER Service.
+  # Change the path-pattern value as necessary (ex.: /api/customers/*)
+  CustomerServiceListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
-      DBSubnetGroupDescription: multi-AZ subnet group for RDS instances
-      SubnetIds:
-        - Ref: DBSubnet1
-        - Ref: DBSubnet2
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /customers*
+        - Field: source-ip
+          SourceIpConfig:
+            Values:
+              - Fn::GetAtt:
+                  - VpcBookstore
+                  - CidrBlock
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref CustomerServiceTargetGroup
+      ListenerArn: !Ref InternalHTTPListener
+      Priority: 2
 
-  # DB Security group
-  # (The DependsOn property just tells AWS that the EC2SecurityGroup needs to be created before this security group.)
-  # Port 3306 is the default TCP port used by MySQL databases.
-  DBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    DependsOn: EC2SecurityGroup
+  # ListenerRule that defines the routing condition for calling the BOOK Service.
+  # Change the path-pattern value as necessary (ex.: /api/books/*)
+  BookServiceListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
-      GroupName: DBSecurityGroup
-      GroupDescription: Open database for access
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /books*
+        - Field: source-ip
+          SourceIpConfig:
+            Values:
+              - Fn::GetAtt:
+                  - VpcBookstore
+                  - CidrBlock
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref BookServiceTargetGroup
+      ListenerArn: !Ref InternalHTTPListener
+      Priority: 3
+
+
+  # Target groups
+  # The listener defined for a load balancer will point to a target group.
+  # So, the target group is used to route requests to one or more registered targets (in this case EC2 instances).
+  # It acts as a logical grouping of targets. The ALB continually monitors the health of registered targets.
+  # Requests are routed to healthy targets within the target group.
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticloadbalancingv2-targetgroup.html
+
+  # Target group for the Web App BFF - Instances EC2BookstoreA and EC2BookstoreB from two AZs.
+  WebBFFTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: WebBFFTargetGroup
+      Port: 80
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      Targets:
+        - Id: !Ref EC2BookstoreA
+          Port: 80
+        - Id: !Ref EC2BookstoreB
+          Port: 80
       VpcId: !Ref VpcBookstore
-      SecurityGroupEgress:
-        - Description: Allow all outbound traffic
-          IpProtocol: "-1"
-          CidrIp: 0.0.0.0/0
-      SecurityGroupIngress:
-        - IpProtocol: tcp  # port 3306 open to the EC2 instances.
-          FromPort: 3306
-          ToPort: 3306
-          SourceSecurityGroupId:
-            Ref: EC2SecurityGroup
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: "/status"
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 15
+      HealthyThresholdCount: 5
+      Matcher:
+        HttpCode: '200'
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-WebBFFTargetGroup"
+
+  # Target group for the Web App BFF - Instances EC2BookstoreC and EC2BookstoreD from two AZs.
+  MobileBFFTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: MobileBFFTargetGroup
+      Port: 80
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      Targets:
+        - Id: !Ref EC2BookstoreC
+          Port: 80
+        - Id: !Ref EC2BookstoreD
+          Port: 80
+      VpcId: !Ref VpcBookstore
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: "/status"
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 15
+      HealthyThresholdCount: 5
+      Matcher:
+        HttpCode: '200'
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-MobileBFFTargetGroup"
+
+  # Target group for the backend CUSTOMER service - Instances EC2BookstoreA and EC2BookstoreD from two AZs.
+  CustomerServiceTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: CustomerServiceTargetGroup
+      Port: 3000
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      Targets:
+        - Id: !Ref EC2BookstoreA
+          Port: 3000
+        - Id: !Ref EC2BookstoreD
+          Port: 3000
+      VpcId: !Ref VpcBookstore
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: "/status"
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 15
+      HealthyThresholdCount: 5
+      Matcher:
+        HttpCode: '200'
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-CustomerServiceTargetGroup"
+
+  # Target group for the backend BOOK service - Instances EC2BookstoreB and EC2BookstoreC from two AZs.
+  BookServiceTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: BookServiceTargetGroup
+      Port: 3000
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      Targets:
+        - Id: !Ref EC2BookstoreB
+          Port: 3000
+        - Id: !Ref EC2BookstoreC
+          Port: 3000
+      VpcId: !Ref VpcBookstore
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: "/status"
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 15
+      HealthyThresholdCount: 5
+      Matcher:
+        HttpCode: '200'
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-BookServiceTargetGroup"
+
 
   # RDS Aurora cluster
   # By declaring two DB instances in the cluster, Aurora will make the 1st instance the primary and the second the
   # replica, and will manage the primary/replica roles automatically from then on.
+  #
+  # You may use aurora-postgresql instead of aurora-mysql (in that case, traffic is through port 5432 by default).
+  # Postgres has more advanced features suitable for large scale workloads; MySQL is simpler to configure and suitable for smaller-scale apps.
+  #
+  # Amazon Linux 2023 (used for the EC2 instances in this CF template) does not offer the mysql package in its package
+  # repository anymore. Instead, you can use MariaDB, which is compatible with MySQL:
+  #   sudo dnf install mariadb105-server -y
+  #   mysql -h <writer_instance_endpoint> -u <username> -p
+  #
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-rds-dbcluster.html
   DBClusterAuroraBookstore:
     Type: AWS::RDS::DBCluster
     Properties:
+      DBClusterIdentifier: bookstore-db-dev
       Engine: aurora-mysql
+      Port: 3306
       MasterUsername: !Ref DBUsername
       MasterUserPassword: !Ref DBPassword
-      BackupRetentionPeriod: '7'
-      PreferredBackupWindow: 01:00-02:00
-      PreferredMaintenanceWindow: mon:03:00-mon:04:00
-      DBSubnetGroupName: !Ref MyDBSubnetGroup
-      Port: 3306
       VpcSecurityGroupIds:
         - !Ref DBSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
       StorageEncrypted: true
+      BackupRetentionPeriod: '1'
+      PreferredBackupWindow: 01:00-02:00
+      PreferredMaintenanceWindow: mon:03:00-mon:04:00
 
-  # The DBInstanceClass should be db.t3.medium. (In 2023 we could use small, but the constraints have changed.)
+  # For security, PubliclyAccessible should be false (especially for production).
+  # Constraints regarding DB version and DBInstanceClass: https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Concepts.DBInstanceClass.SupportAurora.html
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-rds-dbinstance.html
   DBAuroraA:
     Type: AWS::RDS::DBInstance
     Properties:
+      DBInstanceIdentifier: bookstore-db-dev-instance1
       Engine: aurora-mysql
       DBClusterIdentifier: !Ref DBClusterAuroraBookstore
       DBInstanceClass: db.t3.medium
-      DBSubnetGroupName: !Ref MyDBSubnetGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
       PubliclyAccessible: false
-
   DBAuroraB:
     Type: AWS::RDS::DBInstance
     Properties:
+      DBInstanceIdentifier: bookstore-db-dev-instance2
       Engine: aurora-mysql
       DBClusterIdentifier: !Ref DBClusterAuroraBookstore
       DBInstanceClass: db.t3.medium
-      DBSubnetGroupName: !Ref MyDBSubnetGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
       PubliclyAccessible: false
-

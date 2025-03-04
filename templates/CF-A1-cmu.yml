@@ -6,6 +6,7 @@ Parameters:
     Description: 'Give a short name for your VPC. It will be used as a prefix in the name of other resources.'
     Type: String
     NoEcho: false
+    Default: bookstore-dev
 
   SSHLocation:
     Description: The IP address range that can be used to SSH to the EC2 instances
@@ -40,7 +41,7 @@ Resources:
   # There are 1+ subnets defined in a VPC. Each subnet is a range of IP addresses and is limited to a single AZ.
   # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-vpc.html
   VpcBookstore:
-    Type: 'AWS::EC2::VPC'
+    Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 10.0.0.0/16
       EnableDnsSupport: 'true'
@@ -75,34 +76,34 @@ Resources:
   # Private subnets for the RDS database instances
   # They become elements of a DBSubnetGroup that is used in the DB configuration.
   DBSubnet1:
-    Type: 'AWS::EC2::Subnet'
+    Type: AWS::EC2::Subnet
     Properties:
       VpcId:
         Ref: VpcBookstore
       CidrBlock: 10.0.3.0/24
       AvailabilityZone: !Select [ 0, !GetAZs "" ]
       Tags:
-        - Key: name
+        - Key: Name
           Value: !Sub "${VpcName}-DBSubnet1"
   DBSubnet2:
-    Type: 'AWS::EC2::Subnet'
+    Type: AWS::EC2::Subnet
     Properties:
       VpcId:
         Ref: VpcBookstore
       CidrBlock: 10.0.5.0/24
       AvailabilityZone: !Select [ 1, !GetAZs "" ]
       Tags:
-        - Key: name
+        - Key: Name
           Value: !Sub "${VpcName}-DBSubnet2"
 
   # DB Subnet group
   # It defines the subnets where RDS DB instances will reside. Each subnet should be in a separate AZ.
   # DB instances will run in the subnets specified by this DBSubnetGroup. We select subnets from different AZs for high availability.
   # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-rds-dbsubnetgroup.html
-  MyDBSubnetGroup:
-    Type: "AWS::RDS::DBSubnetGroup"
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
     Properties:
-      DBSubnetGroupName: !Sub "${VpcName}-MyDBSubnetGroup"
+      DBSubnetGroupName: !Sub "${VpcName}-DBSubnetGroup"
       DBSubnetGroupDescription: Multi-AZ subnet group for RDS instances
       SubnetIds:
         - Ref: DBSubnet1
@@ -113,7 +114,7 @@ Resources:
   # A public subnet needs an Internet Gateway. Between IPs in a subnet and an Internet gateway we need route tables.
   # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-internetgateway.html
   InternetGateway:
-    Type: "AWS::EC2::InternetGateway"
+    Type: AWS::EC2::InternetGateway
     DependsOn: VpcBookstore
     Properties:
       Tags:
@@ -168,7 +169,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName: !Sub "${VpcName}-ALBSecurityGroup"
-      GroupDescription: ALB Security Group allowing HTTP(S) from anywhere
+      GroupDescription: SG allowing HTTP(S) from anywhere
       VpcId: !Ref VpcBookstore
       Tags:
         - Key: Name
@@ -192,7 +193,7 @@ Resources:
   # EC2 Security Group
   EC2SecurityGroup:
     DependsOn: ALBSecurityGroup
-    Type: 'AWS::EC2::SecurityGroup'
+    Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName: !Sub "${VpcName}-EC2SecurityGroup"
       GroupDescription: Security group for EC2 instances allowing http and ssh
@@ -250,7 +251,7 @@ Resources:
   # instructions to pull and run your service docker images. 
   # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-instance.html
   EC2BookstoreA:
-    Type: 'AWS::EC2::Instance'
+    Type: AWS::EC2::Instance
     Properties:
       ImageId: ami-053a45fff0a704a47
       InstanceType: t3.micro
@@ -281,7 +282,7 @@ Resources:
       InstanceId: !Ref EC2BookstoreA
 
   EC2BookstoreB:
-    Type: 'AWS::EC2::Instance'
+    Type: AWS::EC2::Instance
     Properties:
       ImageId: ami-053a45fff0a704a47
       InstanceType: t3.micro
@@ -350,8 +351,9 @@ Resources:
           TargetGroupArn: !Ref EC2TargetGroup
           Type: forward
 
-  # ALB target group
-  # Is used to route requests to one or more registered targets (in this case EC2 instances).
+  # Target group
+  # The listener defined for a load balancer will point to a target group.
+  # So, the target group is used to route requests to one or more registered targets (in this case EC2 instances).
   # It acts as a logical grouping of targets. The ALB continually monitors the health of registered targets.
   # Requests are routed to healthy targets within the target group.
   # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticloadbalancingv2-targetgroup.html
@@ -406,7 +408,7 @@ Resources:
       MasterUserPassword: !Ref DBPassword
       VpcSecurityGroupIds:
         - !Ref DBSecurityGroup
-      DBSubnetGroupName: !Ref MyDBSubnetGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
       StorageEncrypted: true
       BackupRetentionPeriod: '1'
       PreferredBackupWindow: 01:00-02:00
@@ -422,7 +424,7 @@ Resources:
       Engine: aurora-mysql
       DBClusterIdentifier: !Ref DBClusterAuroraBookstore
       DBInstanceClass: db.t3.medium
-      DBSubnetGroupName: !Ref MyDBSubnetGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
       PubliclyAccessible: false
   DBAuroraB:
     Type: AWS::RDS::DBInstance
@@ -431,5 +433,5 @@ Resources:
       Engine: aurora-mysql
       DBClusterIdentifier: !Ref DBClusterAuroraBookstore
       DBInstanceClass: db.t3.medium
-      DBSubnetGroupName: !Ref MyDBSubnetGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
       PubliclyAccessible: false
