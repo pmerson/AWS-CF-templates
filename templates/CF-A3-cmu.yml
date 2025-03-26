@@ -1,13 +1,19 @@
 AWSTemplateFormatVersion: 2010-09-09
 Parameters:
 
+  VpcName:
+    Description: 'Give a short name for your VPC. It will be used as a prefix in the name of other resources.'
+    Type: String
+    NoEcho: false
+    Default: bookstore-dev
+
   LabRoleARN:
     Type: String
     Description: "Enter the ARN for LabRole you find here: IAM | Roles | click on LabRole | copy ARN"
 
-  AccountID:
-    Type: String
-    Description: "Enter the Account ID you find by clicking the user on the top right of the AWS console"
+#  AccountID:
+#    Type: String
+#    Description: "Enter the Account ID you find by clicking the user on the top right of the AWS console"
 
   # Database credentials
   DBUsername:
@@ -51,24 +57,25 @@ Parameters:
     Default: 192.168.192.0/18
     Description: CidrBlock for private subnet 02 within the VPC
 
-Metadata:
-  AWS::CloudFormation::Interface:
-    ParameterGroups:
-      -
-        Label:
-          default: "Worker Network Configuration"
-        Parameters:
-          - VpcBlock
-          - PublicSubnet1Block
-          - PublicSubnet2Block
-          - DBSubnet1Block
-          - DBSubnet2Block
+#Metadata:
+#  AWS::CloudFormation::Interface:
+#    ParameterGroups:
+#      -
+#        Label:
+#          default: "Worker Network Configuration"
+#        Parameters:
+#          - VpcBlock
+#          - PublicSubnet1Block
+#          - PublicSubnet2Block
+#          - DBSubnet1Block
+#          - DBSubnet2Block
 
 Resources:
 
   # VPC
   # It's a virtual private network where within you launch resources you'll manage.
   # There are 1+ subnets defined in a VPC. Each subnet is a range of IP addresses and is limited to a single AZ.
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-vpc.html
   VpcBookstore:
     Type: AWS::EC2::VPC
     Properties:
@@ -77,29 +84,126 @@ Resources:
       EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-VpcBookstore'
+          Value: !Sub '${VpcName}-${AWS::StackName}'
+
+  # Public subnets for the K8S nodes. Each subnet is in a different availability zone (AZ)
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-subnet.html
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      MapPublicIpOnLaunch: true
+      AvailabilityZone:
+        Fn::Select:
+          - '0'
+          - Fn::GetAZs:
+              Ref: AWS::Region
+      VpcId:
+        Ref: VpcBookstore
+      CidrBlock:
+        Ref: PublicSubnet1Block
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-PublicSubnet1"
+        - Key: kubernetes.io/role/elb
+          Value: 1
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      MapPublicIpOnLaunch: true
+      AvailabilityZone:
+        Fn::Select:
+          - '1'
+          - Fn::GetAZs:
+              Ref: AWS::Region
+      VpcId:
+        Ref: VpcBookstore
+      CidrBlock:
+        Ref: PublicSubnet2Block
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-PublicSubnet2"
+        - Key: kubernetes.io/role/elb
+          Value: 1
+
+  # Private subnets for the RDS database instances
+  DBSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+          - '0'
+          - Fn::GetAZs:
+              Ref: AWS::Region
+      VpcId:
+        Ref: VpcBookstore
+      CidrBlock:
+        Ref: DBSubnet1Block
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-DBSubnet1"
+        - Key: kubernetes.io/role/internal-elb
+          Value: 1
+  DBSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+          - '1'
+          - Fn::GetAZs:
+              Ref: AWS::Region
+      VpcId:
+        Ref: VpcBookstore
+      CidrBlock:
+        Ref: DBSubnet2Block
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-DBSubnet2"
+        - Key: kubernetes.io/role/internal-elb
+          Value: 1
+
+  # DB Subnet group
+  # It defines the subnets where RDS DB instances will reside. Each subnet should be in a separate AZ.
+  # DB instances will run in the subnets specified by this DBSubnetGroup. We select subnets from different AZs for high availability.
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-rds-dbsubnetgroup.html
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub "${VpcName}-DBSubnetGroup"
+      DBSubnetGroupDescription: Multi-AZ subnet group for RDS instances
+      SubnetIds:
+        - !Ref DBSubnet1
+        - !Ref DBSubnet2
 
   # Internet gateway
   # It enables the communication between the VPC and the public Internet. It provides routing and NAT services.
+  # A public subnet needs an Internet Gateway. Between IPs in a subnet and an Internet gateway we need route tables.
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-internetgateway.html
   InternetGateway:
     Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-IGW"
   VPCGatewayAttachment:
     Type: "AWS::EC2::VPCGatewayAttachment"
     Properties:
-      InternetGatewayId: !Ref InternetGateway
       VpcId: !Ref VpcBookstore
+      InternetGatewayId: !Ref InternetGateway
 
-  # Route tables
+  # Route tables + routes + subnet-route associations.
+  # The route we need is: PublicSubnet12 --> PUBLIC ROUTE --> Internet Gateway
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-route.html
+
+  # PUBLIC ROUTE
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VpcBookstore
       Tags:
         - Key: Name
-          Value: Public Subnets
+          Value: !Sub "${VpcName}-PublicRouteTable"
         - Key: Network
           Value: Public
-
   # The public route table routes directly to the Internet Gateway
   PublicRoute:
     Type: AWS::EC2::Route
@@ -108,110 +212,102 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
-
-  NatGateway01:
-    Type: AWS::EC2::NatGateway
-    DependsOn:
-      - NatGatewayElasticIP1
-      - PublicSubnet1
-      - VPCGatewayAttachment
-    Properties:
-      AllocationId: !GetAtt 'NatGatewayElasticIP1.AllocationId'
-      SubnetId: !Ref PublicSubnet1
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-NatGatewayAZ1'
-
-  NatGateway02:
-    Type: AWS::EC2::NatGateway
-    DependsOn:
-      - NatGatewayElasticIP2
-      - PublicSubnet2
-      - VPCGatewayAttachment
-    Properties:
-      AllocationId: !GetAtt 'NatGatewayElasticIP2.AllocationId'
-      SubnetId: !Ref PublicSubnet2
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-NatGatewayAZ2'
-
-  NatGatewayElasticIP1:
-    DependsOn:
-      - VPCGatewayAttachment
-    Type: 'AWS::EC2::EIP'
-    Properties:
-      Domain: vpc
-
-  NatGatewayElasticIP2:
-    DependsOn:
-      - VPCGatewayAttachment
-    Type: 'AWS::EC2::EIP'
-    Properties:
-      Domain: vpc
-
-  # Public subnets for the K8S nodes
-  # Each subnet is in a different availability zone (AZ)
-  PublicSubnet1:
-    Type: AWS::EC2::Subnet
-    Metadata:
-      Comment: Subnet 01
-    Properties:
-      MapPublicIpOnLaunch: true
-      AvailabilityZone:
-        Fn::Select:
-          - '0'
-          - Fn::GetAZs:
-              Ref: AWS::Region
-      CidrBlock:
-        Ref: PublicSubnet1Block
-      VpcId:
-        Ref: VpcBookstore
-      Tags:
-        - Key: Name
-          Value: !Sub "${AWS::StackName}-PublicSubnet1"
-        - Key: kubernetes.io/role/elb
-          Value: 1
-
-  PublicSubnet2:
-    Type: AWS::EC2::Subnet
-    Metadata:
-      Comment: Subnet 02
-    Properties:
-      MapPublicIpOnLaunch: true
-      AvailabilityZone:
-        Fn::Select:
-          - '1'
-          - Fn::GetAZs:
-              Ref: AWS::Region
-      CidrBlock:
-        Ref: PublicSubnet2Block
-      VpcId:
-        Ref: VpcBookstore
-      Tags:
-        - Key: Name
-          Value: !Sub "${AWS::StackName}-PublicSubnet2"
-        - Key: kubernetes.io/role/elb
-          Value: 1
-
   # Route table associated with subnets. Attaches a public subnets to a public route table.
   PublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnet1
       RouteTableId: !Ref PublicRouteTable
-
   PublicSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnet2
       RouteTableId: !Ref PublicRouteTable
 
+  # A NatGateway allows resources in private subnets to initiate outbound Internet connections.
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-natgateway.html
+#  NatGateway01:
+#    Type: AWS::EC2::NatGateway
+#    DependsOn:
+#      - NatGatewayElasticIP1
+#      - PublicSubnet1
+#      - VPCGatewayAttachment
+#    Properties:
+#      AllocationId: !GetAtt 'NatGatewayElasticIP1.AllocationId'
+#      SubnetId: !Ref PublicSubnet1
+#      Tags:
+#        - Key: Name
+#          Value: !Sub '${VpcName}-NatGateway01'
+#  NatGateway02:
+#    Type: AWS::EC2::NatGateway
+#    DependsOn:
+#      - NatGatewayElasticIP2
+#      - PublicSubnet2
+#      - VPCGatewayAttachment
+#    Properties:
+#      AllocationId: !GetAtt 'NatGatewayElasticIP2.AllocationId'
+#      SubnetId: !Ref PublicSubnet2
+#      Tags:
+#        - Key: Name
+#          Value: !Sub '${VpcName}-NatGateway02'
+#  NatGatewayElasticIP1:
+#    DependsOn:
+#      - VPCGatewayAttachment
+#    Type: 'AWS::EC2::EIP'
+#    Properties:
+#      Domain: vpc
+#      Tags:
+#        - Key: Name
+#          Value: !Sub '${VpcName}-NatGatewayElasticIP1'
+#  NatGatewayElasticIP2:
+#    DependsOn:
+#      - VPCGatewayAttachment
+#    Type: 'AWS::EC2::EIP'
+#    Properties:
+#      Domain: vpc
+#      Tags:
+#        - Key: Name
+#          Value: !Sub '${VpcName}-NatGatewayElasticIP2'
+
+
+
+  # SECURITY GROUPS
+  # A security group defines what inbound and outbound traffic is allowed.
+  # Allowed traffic is specified in terms of protocols, ports and IP ranges.
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-securitygroup.html
+
   # Security group to be used for the EKS cluster. It is automatically applied to all nodes in the cluster.
-  ControlPlaneSecurityGroup:
+  EksSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
+      GroupName: !Sub "${VpcName}-EksSecurityGroup"
       GroupDescription: Cluster communication with worker nodes
       VpcId: !Ref VpcBookstore
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-EksSecurityGroup"
+
+  # DB Security group
+  # Port 3306 is the default TCP port used by MySQL databases.
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${VpcName}-DBSecurityGroup"
+      GroupDescription: Open database for access from K8S nodes
+      VpcId: !Ref VpcBookstore
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-DBSecurityGroup"
+      SecurityGroupIngress:
+        - IpProtocol: tcp  # port 3306 opened to the worker nodes in the EKS cluster
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId:
+            Ref: EksSecurityGroup
+      SecurityGroupEgress:
+        - Description: Allow all outbound traffic
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
 
 
   #
@@ -220,17 +316,17 @@ Resources:
   # The SubnetIds indicate the subnets where K8S control plane components (API server, scheduler, etc.) will be deployed.
   # The Logging property enables CloudWatch logging for these types of calls: api (calls to the API server),
   # audit (actions performed by users), and authenticator.
-  #
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-eks-cluster.html
   BookstoreEKSCluster:
     Type: AWS::EKS::Cluster
     Properties:
-      Name: !Sub "BookstoreEKSCluster-${AWS::StackName}"
+      Name: !Sub "${VpcName}-BookstoreEKSCluster"
       RoleArn: !Ref LabRoleARN
       ResourcesVpcConfig:
         EndpointPrivateAccess: true
         EndpointPublicAccess: true
         SecurityGroupIds:
-          - !Ref ControlPlaneSecurityGroup
+          - !Ref EksSecurityGroup
         SubnetIds:
           - !Ref PublicSubnet1
           - !Ref PublicSubnet2
@@ -242,18 +338,46 @@ Resources:
             - Type: authenticator
       AccessConfig:
         AuthenticationMode: API_AND_CONFIG_MAP
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-BookstoreEKSCluster"
 
   # Install the Amazon CloudWatch Observability EKS add-on (our goal is to see application logs)
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-eks-addon.html
   CloudObservabilityAddon:
     Type: AWS::EKS::Addon
     Properties:
       ClusterName: !Ref BookstoreEKSCluster
       AddonName: amazon-cloudwatch-observability
+      Tags:
+        - Key: Name
+          Value: !Sub "${VpcName}-CloudObservabilityAddon"
+
+  # Node group with 1-5 nodes for the EKS cluster
+  # Subnets indicate the subnets where K8S worker nodes will be deployed
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-eks-nodegroup.html
+  EksNodeGroup:
+    Type: AWS::EKS::Nodegroup
+    Properties:
+      ClusterName: !Ref BookstoreEKSCluster
+      NodegroupName: !Sub "${VpcName}-EksNodeGroup"
+      NodeRole: !Ref LabRoleARN
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      ScalingConfig:
+        DesiredSize: 6
+        MaxSize: 8
+        MinSize: 2
+      InstanceTypes:
+        - t2.medium
+        - t3.medium
+        - t2.large
+
 
   # The console/shell user needs to be granted EKS cluster access with policy AmazonEKSClusterAdminPolicy.
-  # The commented out resource below was supposed to grant that permission, but it didn't work. As it stands, you
+  # The commented out resource below was supposed to grant that permission, but it didn't work on AWS Academy. As it stands, you
   #  should add the access manually on the AWS console. (But you're welcome to try to make the AccessEntry below work.)
-
   # The access entry for the EKS cluster allows the LL console user to manage and deploy things to K8S.
 #  EKSAccessToUser:
 #    Type: AWS::EKS::AccessEntry
@@ -268,29 +392,59 @@ Resources:
 # Also tried: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy, AmazonEKSClusterAdminPolicy
 
 
-  # Node group with 1-5 nodes for the EKS cluster
-  # Suubnets indicate the subnets where K8S worker nodes will be deployed
-  MyNodeGroup:
-    Type: AWS::EKS::Nodegroup
+
+
+  # RDS Aurora cluster
+  # By declaring two DB instances in the cluster, Aurora will make the 1st instance the primary and the second the
+  # replica, and will manage the primary/replica roles automatically from then on.
+  #
+  # You may use aurora-postgresql instead of aurora-mysql (in that case, traffic is through port 5432 by default).
+  # Postgres has more advanced features suitable for large scale workloads; MySQL is simpler to configure and suitable for smaller-scale apps.
+  #
+  # Amazon Linux 2023 (used for the EC2 instances in this CF template) does not offer the mysql package in its package
+  # repository anymore. Instead, you can use MariaDB, which is compatible with MySQL:
+  #   sudo dnf install mariadb105-server -y
+  #   mysql -h <writer_instance_endpoint> -u <username> -p
+  #
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-rds-dbcluster.html
+  DBClusterAuroraBookstore:
+    Type: AWS::RDS::DBCluster
     Properties:
-      ClusterName: !Ref BookstoreEKSCluster
-      NodeRole: !Ref LabRoleARN
-      Subnets:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
-#        - !Ref DBSubnet1
-#        - !Ref DBSubnet2
-      ScalingConfig:
-        DesiredSize: 6
-        MaxSize: 8
-        MinSize: 2
-      InstanceTypes:
-        - t2.large
+      DBClusterIdentifier: bookstore-db-dev
+      Engine: aurora-mysql
+      Port: 3306
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      VpcSecurityGroupIds:
+        - !Ref DBSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      StorageEncrypted: true
+      BackupRetentionPeriod: '1'
+      PreferredBackupWindow: 01:00-02:00
+      PreferredMaintenanceWindow: mon:03:00-mon:04:00
 
+  # For security, PubliclyAccessible should be false (especially for production).
+  # Constraints regarding DB version and DBInstanceClass: https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Concepts.DBInstanceClass.SupportAurora.html
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-rds-dbinstance.html
+  DBAuroraA:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: bookstore-db-dev-instance1
+      Engine: aurora-mysql
+      DBClusterIdentifier: !Ref DBClusterAuroraBookstore
+      DBInstanceClass: db.t3.medium
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: false
+  DBAuroraB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: bookstore-db-dev-instance2
+      Engine: aurora-mysql
+      DBClusterIdentifier: !Ref DBClusterAuroraBookstore
+      DBInstanceClass: db.t3.medium
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: false
 
-  #
-  # Database configuration
-  #
 
 #  PrivateRouteTable01:
 #    Type: AWS::EC2::RouteTable
@@ -310,7 +464,7 @@ Resources:
 #          Value: Private Subnet AZ2
 #        - Key: Network
 #          Value: Private02
-
+#
 #  PrivateRoute01:
 #    DependsOn:
 #      - VPCGatewayAttachment
@@ -329,7 +483,7 @@ Resources:
 #      RouteTableId: !Ref PrivateRouteTable02
 #      DestinationCidrBlock: 0.0.0.0/0
 #      NatGatewayId: !Ref NatGateway02
-
+#
 #  DBSubnet1RouteTableAssociation:
 #    Type: AWS::EC2::SubnetRouteTableAssociation
 #    Properties:
@@ -340,128 +494,4 @@ Resources:
 #    Properties:
 #      SubnetId: !Ref DBSubnet2
 #      RouteTableId: !Ref PrivateRouteTable02
-
-
-  # Private subnets for the RDS database instances
-  DBSubnet1:
-    Type: AWS::EC2::Subnet
-    Metadata:
-      Comment: Subnet 03
-    Properties:
-      AvailabilityZone:
-        Fn::Select:
-          - '0'
-          - Fn::GetAZs:
-              Ref: AWS::Region
-      CidrBlock:
-        Ref: DBSubnet1Block
-      VpcId:
-        Ref: VpcBookstore
-      Tags:
-        - Key: Name
-          Value: !Sub "${AWS::StackName}-DBSubnet1"
-        - Key: kubernetes.io/role/internal-elb
-          Value: 1
-  DBSubnet2:
-    Type: AWS::EC2::Subnet
-    Metadata:
-      Comment: Private Subnet 02
-    Properties:
-      AvailabilityZone:
-        Fn::Select:
-          - '1'
-          - Fn::GetAZs:
-              Ref: AWS::Region
-      CidrBlock:
-        Ref: DBSubnet2Block
-      VpcId:
-        Ref: VpcBookstore
-      Tags:
-        - Key: Name
-          Value: !Sub "${AWS::StackName}-DBSubnet2"
-        - Key: kubernetes.io/role/internal-elb
-          Value: 1
-
-
-  # DB Subnet group
-  # It defines the subnets where RDS DB instances will reside. Each subnet should be in a separate AZ.
-  MyDBSubnetGroup:
-    Type: 'AWS::RDS::DBSubnetGroup'
-    Properties:
-      DBSubnetGroupName: MyDBSubnetGroup
-      DBSubnetGroupDescription: My subnet group for RDS
-      SubnetIds:
-        - !Ref DBSubnet1
-        - !Ref DBSubnet2
-
-  # DB Security group
-  # Port 3306 is the default TCP port used by MySQL databases.
-  DBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupName: DBSecurityGroup
-      GroupDescription: Open database for access
-      VpcId: !Ref VpcBookstore
-      SecurityGroupEgress:
-        - Description: Allow all outbound traffic
-          IpProtocol: "-1"
-          CidrIp: 0.0.0.0/0
-      SecurityGroupIngress:
-        - IpProtocol: tcp  # port 3306 opened to the worker nodes in the EKS cluster
-          FromPort: 3306
-          ToPort: 3306
-          SourceSecurityGroupId:
-            Ref: ControlPlaneSecurityGroup
-
-  # RDS Aurora cluster
-  # By declaring two DB instances in the cluster, Aurora will make the 1st instance the primary and the second the
-  # replica, and will manage the primary/replica roles automatically from then on.
-  DBClusterAuroraBookstore:
-    Type: AWS::RDS::DBCluster
-    Properties:
-      Engine: aurora-mysql
-      MasterUsername: !Ref DBUsername
-      MasterUserPassword: !Ref DBPassword
-      BackupRetentionPeriod: '7'
-      PreferredBackupWindow: 01:00-02:00
-      PreferredMaintenanceWindow: mon:03:00-mon:04:00
-      DBSubnetGroupName: !Ref MyDBSubnetGroup
-      Port: 3306
-      VpcSecurityGroupIds:
-        - !Ref DBSecurityGroup
-      StorageEncrypted: true
-
-  DBAuroraA:
-    Type: AWS::RDS::DBInstance
-    Properties:
-      Engine: aurora-mysql
-      DBClusterIdentifier: !Ref DBClusterAuroraBookstore
-      DBInstanceClass: db.t3.medium
-      DBSubnetGroupName: !Ref MyDBSubnetGroup
-      PubliclyAccessible: false
-
-  DBAuroraB:
-    Type: AWS::RDS::DBInstance
-    Properties:
-      Engine: aurora-mysql
-      DBClusterIdentifier: !Ref DBClusterAuroraBookstore
-      DBInstanceClass: db.t3.medium
-      DBSubnetGroupName: !Ref MyDBSubnetGroup
-      PubliclyAccessible: false
-
-
-Outputs:
-
-  SubnetIds:
-    Description: Subnets IDs in the VPC
-    Value: !Join [ ",", [ !Ref PublicSubnet1, !Ref PublicSubnet2, !Ref DBSubnet1, !Ref DBSubnet2 ] ]
-
-  SecurityGroups:
-    Description: Security group for the cluster control plane communication with worker nodes
-    Value: !Join [ ",", [ !Ref ControlPlaneSecurityGroup ] ]
-
-  VpcId:
-    Description: The VPC Id
-    Value: !Ref VpcBookstore
-
 
