@@ -44,8 +44,8 @@ Resources:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 10.0.0.0/16
-      EnableDnsSupport: 'true'
-      EnableDnsHostnames: 'true'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
       Tags:
         - Key: Name
           Value: !Sub '${VpcName}-${AWS::StackName}'
@@ -124,7 +124,7 @@ Resources:
     Type: "AWS::EC2::VPCGatewayAttachment"
     Properties:
       VpcId: !Ref VpcBookstore
-      InternetGatewayId: !Ref "InternetGateway"
+      InternetGatewayId: !Ref InternetGateway
 
   # Route tables + routes + subnet-route associations.
   # The route we need is: PublicSubnet12 --> PUBLIC ROUTE --> Internet Gateway
@@ -214,6 +214,12 @@ Resources:
             Fn::GetAtt:
               - ExternalALBSecurityGroup
               - GroupId
+        - Description: Allow traffic on port 3000 from the internal ALB
+          IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId:
+            Ref: InternalALBSecurityGroup
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"  # ALL
@@ -300,6 +306,9 @@ Resources:
     Type: AWS::EC2::EIP
     Properties:
       InstanceId: !Ref EC2BookstoreA
+      Tags:
+        - Key: Name
+          Value: !Sub '${VpcName}-ElasticIPA'
 
   EC2BookstoreB:
     Type: AWS::EC2::Instance
@@ -331,6 +340,9 @@ Resources:
     Type: AWS::EC2::EIP
     Properties:
       InstanceId: !Ref EC2BookstoreB
+      Tags:
+        - Key: Name
+          Value: !Sub '${VpcName}-ElasticIPB'
 
   EC2BookstoreC:
     Type: AWS::EC2::Instance
@@ -362,6 +374,9 @@ Resources:
     Type: AWS::EC2::EIP
     Properties:
       InstanceId: !Ref EC2BookstoreC
+      Tags:
+        - Key: Name
+          Value: !Sub '${VpcName}-ElasticIPC'
 
   EC2BookstoreD:
     Type: AWS::EC2::Instance
@@ -393,9 +408,13 @@ Resources:
     Type: AWS::EC2::EIP
     Properties:
       InstanceId: !Ref EC2BookstoreD
+      Tags:
+        - Key: Name
+          Value: !Sub '${VpcName}-ElasticIPD'
 
 
   # Application Load Balancers (ALB)
+  # It's a layer 7 (application layer) load balancer, ideal for HTTP/HTTPS traffic.
   # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticloadbalancingv2-loadbalancer.html
 
   # The ALB for Internet facing traffic (EXTERNAL)
