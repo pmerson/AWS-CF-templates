@@ -299,11 +299,15 @@ Resources:
         - Key: Name
           Value: !Sub "${VpcName}-DBSecurityGroup"
       SecurityGroupIngress:
-        - IpProtocol: tcp  # port 3306 opened to the worker nodes in the EKS cluster
+        - IpProtocol: tcp  # port 3306 open to EKS cluster automatically created SG
           FromPort: 3306
           ToPort: 3306
           SourceSecurityGroupId:
-            Ref: EksSecurityGroup
+            !GetAtt BookstoreEKSCluster.ClusterSecurityGroupId
+        - IpProtocol: tcp  # port 3306 open to SG specified for EKS cluster
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref EksSecurityGroup
       SecurityGroupEgress:
         - Description: Allow all outbound traffic
           IpProtocol: "-1"
@@ -316,6 +320,7 @@ Resources:
   # The SubnetIds indicate the subnets where K8S control plane components (API server, scheduler, etc.) will be deployed.
   # The Logging property enables CloudWatch logging for these types of calls: api (calls to the API server),
   # audit (actions performed by users), and authenticator.
+  # EKS and security group rqmts: https://docs.aws.amazon.com/eks/latest/userguide/sec-group-reqs.html
   # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-eks-cluster.html
   BookstoreEKSCluster:
     Type: AWS::EKS::Cluster
