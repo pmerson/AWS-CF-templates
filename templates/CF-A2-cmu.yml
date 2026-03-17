@@ -544,7 +544,7 @@ Resources:
       Priority: 3
 
 
-  # Target groups
+  # Target group
   # The listener defined for a load balancer will point to a target group.
   # So, the target group is used to route requests to one or more registered targets (in this case EC2 instances).
   # It acts as a logical grouping of targets. The ALB continually monitors the health of registered targets.
@@ -567,7 +567,7 @@ Resources:
         - Id: !Ref EC2BookstoreB
           Port: 80
       VpcId: !Ref VpcBookstore
-      HealthCheckProtocol: HTTP
+      HealthCheckProtocol: HTTP                # ALB Health Check is an example of the ping-echo tactic
       HealthCheckPath: "/status"
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 15

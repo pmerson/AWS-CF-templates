@@ -44,8 +44,8 @@ Resources:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 10.0.0.0/16
-      EnableDnsSupport: 'true'
-      EnableDnsHostnames: 'true'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
       Tags:
         - Key: Name
           Value: !Sub '${VpcName}-${AWS::StackName}'
@@ -124,8 +124,7 @@ Resources:
     Type: "AWS::EC2::VPCGatewayAttachment"
     Properties:
       VpcId: !Ref VpcBookstore
-      InternetGatewayId: !Ref "InternetGateway"
-
+      InternetGatewayId: !Ref InternetGateway
 
   # Route tables + routes + subnet-route associations.
   # The route we need is: PublicSubnet12 --> PUBLIC ROUTE --> Internet Gateway
@@ -280,6 +279,9 @@ Resources:
     Type: AWS::EC2::EIP
     Properties:
       InstanceId: !Ref EC2BookstoreA
+      Tags:
+        - Key: Name
+          Value: !Sub '${VpcName}-ElasticIPA'
 
   EC2BookstoreB:
     Type: AWS::EC2::Instance
@@ -311,6 +313,9 @@ Resources:
     Type: AWS::EC2::EIP
     Properties:
       InstanceId: !Ref EC2BookstoreB
+      Tags:
+        - Key: Name
+          Value: !Sub '${VpcName}-ElasticIPB'
 
 
   # Application Load Balancer (ALB)
@@ -323,8 +328,8 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       Name: !Sub "${VpcName}-ALB"
-      Scheme: internet-facing
       Type: application
+      Scheme: internet-facing
       Subnets:
         - !Ref PublicSubnet1
         - !Ref PublicSubnet2
@@ -334,10 +339,11 @@ Resources:
         - Key: Name
           Value: !Sub "${VpcName}-ALB"
 
-  # ALB listener
-  # Defines the protocol/port combination that the ALB listens on for incoming requests.
+  # listener (for the ALB)
+  # Defines the protocol/port combination that an ALB listens on for incoming requests.
   # It checks for connection requests from clients using the configured protocol and port.
   # Based on the rules you define, it forwards requests to one or more target groups.
+  # DefaultActions are executed if no listener rule matches the incoming request.
   # Each ALB requires at least one listener to accept traffic.
   # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticloadbalancingv2-listener.html
   HTTPListener:
