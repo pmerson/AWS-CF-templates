@@ -363,6 +363,10 @@ Resources:
   # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-eks-nodegroup.html
   EksNodeGroup:
     Type: AWS::EKS::Nodegroup
+    DependsOn:
+      - PublicSubnet1RouteTableAssociation
+      - PublicSubnet2RouteTableAssociation
+      - PublicRoute
     Properties:
       ClusterName: !Ref BookstoreEKSCluster
       NodegroupName: !Sub "${VpcName}-EksNodeGroup"
@@ -379,24 +383,49 @@ Resources:
         - t3.medium
         - t2.large
 
+  # The EKS "hidden" SG created for the control plane needs to reach the EKS cluster nodes to get logs from the
+  # Kubelets (K8S process on each node). So EksSecurityGroup needs to allow access from the control plane SG.
+  # This ingress rule cannot be in the EksSecurityGroup declaration because it references the cluster (BookstoreEKSCluster),
+  # which is created later, as it references the SG. Using this SecurityGroupIngress resource avoids the circular dependency.
+  # Reference: https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-ec2-securitygroupingress.html
+  AllowKubeletLogsIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Allow EKS Control Plane to reach Kubelet for logs
+      GroupId: !Ref EksSecurityGroup    # The SG attached to the worker nodes
+      IpProtocol: tcp
+      FromPort: 10250
+      ToPort: 10250
+      SourceSecurityGroupId: !GetAtt BookstoreEKSCluster.ClusterSecurityGroupId
+
+  AllowEksNodesInterTraffic:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Allow nodes to talk to each other (Required for CNI)
+      GroupId: !Ref EksSecurityGroup   # The SG attached to the worker nodes
+      IpProtocol: -1 # All protocols
+      FromPort: -1   # All ports
+      ToPort: -1     # All ports
+      SourceSecurityGroupId: !Ref EksSecurityGroup
+
 
   # The console/shell user needs to be granted EKS cluster access with policy AmazonEKSClusterAdminPolicy.
-  # The commented out resource below was supposed to grant that permission, but it didn't work on AWS Academy. As it stands, you
-  #  should add the access manually on the AWS console. (But you're welcome to try to make the AccessEntry below work.)
+  # This declaration is supposed to grant that permission, but it didn't work on AWS Academy in the past.
+  # The workaround is to grant the policy directly using the AWS console.
   # The access entry for the EKS cluster allows the LL console user to manage and deploy things to K8S.
 #  EKSAccessToUser:
-#    Type: AWS::EKS::AccessEntry
+#    Type: 'AWS::EKS::AccessEntry'
 #    Properties:
 #      ClusterName: !Ref BookstoreEKSCluster
-#      PrincipalArn: arn:aws:iam::${AccountID}:role/voclabs
+#      PrincipalArn: !Ref LabRoleARN
 #      Type: STANDARD
+#      # Nesting the policy here is the "compatibility" way to do it
 #      AccessPolicies:
-#        - PolicyArn: arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+#        - PolicyArn: 'arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy'
 #          AccessScope:
 #            Type: cluster
-# Also tried: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy, AmazonEKSClusterAdminPolicy
-
-
+  # Also tried: PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy, AmazonEKSClusterAdminPolicy
+  # Also tried: PrincipalArn: arn:aws:iam::${AccountID}:role/voclabs
 
 
   # RDS Aurora cluster
