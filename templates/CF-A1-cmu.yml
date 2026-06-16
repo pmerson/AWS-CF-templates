@@ -372,6 +372,8 @@ Resources:
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
           Value: '30'
+        - Key: load_balancing.algorithm.type
+          Value: round_robin             # TO BE TESTED
       Targets:
         - Id: !Ref EC2BookstoreA
           Port: 80

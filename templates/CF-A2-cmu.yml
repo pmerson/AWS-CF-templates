@@ -561,6 +561,8 @@ Resources:
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
           Value: '30'
+        - Key: load_balancing.algorithm.type
+          Value: round_robin
       Targets:
         - Id: !Ref EC2BookstoreA
           Port: 80
@@ -589,6 +591,8 @@ Resources:
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
           Value: '30'
+        - Key: load_balancing.algorithm.type
+          Value: round_robin
       Targets:
         - Id: !Ref EC2BookstoreC
           Port: 80
@@ -617,6 +621,8 @@ Resources:
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
           Value: '30'
+        - Key: load_balancing.algorithm.type
+          Value: round_robin
       Targets:
         - Id: !Ref EC2BookstoreA
           Port: 3000
@@ -645,6 +651,8 @@ Resources:
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
           Value: '30'
+        - Key: load_balancing.algorithm.type
+          Value: round_robin
       Targets:
         - Id: !Ref EC2BookstoreB
           Port: 3000
